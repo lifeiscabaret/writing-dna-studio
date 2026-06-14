@@ -21,6 +21,19 @@ const DEFAULT_SOURCE =
 
 const MIN_SAMPLE = 20;
 
+/**
+ * One-tap refinements shown under a result. "More casual" / "More polished"
+ * switch the output format (a genuine change today); the others act as a
+ * regeneration hook, ready to carry tone hints once the engine supports them.
+ */
+const REFINEMENTS: { label: string; format?: OutputFormat }[] = [
+  { label: "Warmer" },
+  { label: "Shorter" },
+  { label: "More confident" },
+  { label: "More casual", format: "casual-message" },
+  { label: "More polished", format: "professional-email" },
+];
+
 type DnaMeta = { source: "user" } | { source: "demo"; label: string };
 type FlowMode = "landing" | "demo" | "wizard";
 type WizardStep = 1 | 2 | 3;
@@ -125,7 +138,8 @@ export function Studio({ restartSignal }: StudioProps) {
     }
   }
 
-  async function handleRewrite() {
+  async function handleRewrite(formatOverride?: OutputFormat) {
+    const effectiveFormat = formatOverride ?? format;
     setLoadingRewrite(true);
     setError(null);
     setCopied(false);
@@ -136,7 +150,7 @@ export function Studio({ restartSignal }: StudioProps) {
         body: JSON.stringify({
           styleSample,
           sourceText,
-          format,
+          format: effectiveFormat,
           useKnowledge,
           recipientName,
           senderName,
@@ -150,6 +164,14 @@ export function Studio({ restartSignal }: StudioProps) {
     } finally {
       setLoadingRewrite(false);
     }
+  }
+
+  // Lightweight one-tap refinements. A couple map to a different output format
+  // (a real change today); the rest re-run the rewrite as a regeneration hook
+  // until the engine grows per-request tone controls.
+  function refine(formatOverride?: OutputFormat) {
+    if (formatOverride) setFormat(formatOverride);
+    void handleRewrite(formatOverride);
   }
 
   async function copyOutput() {
@@ -191,15 +213,18 @@ export function Studio({ restartSignal }: StudioProps) {
         <div className="space-y-4">
           <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accent">Writing DNA Studio</p>
           <h1 className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-            Turn any text into your own writing voice.
+            Write anything. Make it sound like you.
           </h1>
+          <p className="mx-auto max-w-2xl text-base leading-relaxed text-muted">
+            Teach the app your voice once, then turn rough drafts into messages, posts, emails, and paragraphs that feel like you.
+          </p>
         </div>
         <div className="grid w-full gap-4 sm:grid-cols-[1fr_auto_1fr]">
           <div className="rounded-3xl border border-border bg-background p-6 text-left shadow-sm">
-            <p className="text-sm font-semibold">Sample text</p>
-            <p className="mt-3 text-sm text-muted">Your voice starts here.</p>
+            <p className="text-sm font-semibold">Rough draft</p>
+            <p className="mt-3 text-sm text-muted">What you'd quickly type.</p>
             <div className="mt-5 h-24 rounded-3xl bg-slate-950/5 p-4 text-sm text-slate-700">
-              “hey! yeah that works for me. lemme know what time and i'll be there. no worries if plans change, just text me 👍”
+              “Can you send me the launch details?”
             </div>
           </div>
           <div className="flex flex-col items-center justify-center gap-3 px-2">
@@ -207,10 +232,10 @@ export function Studio({ restartSignal }: StudioProps) {
             <div className="h-12 w-12 rounded-3xl bg-accent text-2xl leading-none text-white shadow-lg shadow-accent/20">→</div>
           </div>
           <div className="rounded-3xl border border-border bg-background p-6 text-left shadow-sm">
-            <p className="text-sm font-semibold">Rewritten voice</p>
-            <p className="mt-3 text-sm text-muted">Same meaning, more you.</p>
+            <p className="text-sm font-semibold">In your voice</p>
+            <p className="mt-3 text-sm text-muted">How it comes out.</p>
             <div className="mt-5 h-24 rounded-3xl bg-slate-950/5 p-4 text-sm text-slate-700">
-              “hey, the launch is happening next week. want early access? let me know.”
+              “hey! could you send over the launch details when you get a sec? would love to take a look 🙏”
             </div>
           </div>
         </div>
@@ -397,12 +422,13 @@ export function Studio({ restartSignal }: StudioProps) {
           {wizardStep === 3 && (
             <div className="space-y-6 rounded-3xl border border-border bg-card p-6 shadow-sm">
               <div className="grid gap-4">
-                <label className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Source text</label>
+                <label className="text-base font-semibold text-foreground">What do you want to say?</label>
                 <textarea
                   value={sourceText}
                   onChange={(e) => setSourceText(e.target.value)}
                   rows={5}
                   disabled={!dna}
+                  placeholder="Jot down a rough draft — we'll make it sound like you."
                   className="w-full resize-y rounded-3xl border border-border bg-background p-4 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-50"
                 />
               </div>
@@ -466,11 +492,11 @@ export function Studio({ restartSignal }: StudioProps) {
                   Back
                 </button>
                 <button
-                  onClick={handleRewrite}
+                  onClick={() => handleRewrite()}
                   disabled={!dna || loadingRewrite || sourceText.trim().length < 3}
                   className="rounded-full bg-accent px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition hover:bg-accent-2 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {loadingRewrite ? "Rewriting…" : "Rewrite in my voice"}
+                  {loadingRewrite ? "Rewriting…" : "Make it sound like me"}
                 </button>
               </div>
 
@@ -507,13 +533,21 @@ export function Studio({ restartSignal }: StudioProps) {
                     </div>
                   )}
 
-                  <button
-                    onClick={handleRewrite}
-                    disabled={loadingRewrite}
-                    className="mt-6 rounded-full border border-border bg-background px-4 py-2 text-sm font-semibold transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Make it sound more like me
-                  </button>
+                  <div className="mt-6 border-t border-border pt-5">
+                    <p className="text-sm font-semibold text-foreground">Not quite right? Nudge it.</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {REFINEMENTS.map((r) => (
+                        <button
+                          key={r.label}
+                          onClick={() => refine(r.format)}
+                          disabled={loadingRewrite}
+                          className="rounded-full border border-border bg-background px-4 py-2 text-sm font-medium transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {r.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
