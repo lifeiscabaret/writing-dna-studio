@@ -22,27 +22,19 @@ const DEFAULT_SOURCE =
 const MIN_SAMPLE = 20;
 
 type DnaMeta = { source: "user" } | { source: "demo"; label: string };
-
-type TutorialState =
-  | "intro"
-  | "sampleInput"
-  | "generateDna"
-  | "sourceText"
-  | "formatSelect"
-  | "rewrite"
-  | "result"
-  | "done";
+type FlowMode = "landing" | "demo" | "wizard";
+type WizardStep = 1 | 2 | 3;
 
 export function Studio({ restartSignal }: StudioProps) {
-  // Step 1 — samples
+  const [flowMode, setFlowMode] = useState<FlowMode>("landing");
+  const [wizardStep, setWizardStep] = useState<WizardStep>(1);
+
   const [styleSample, setStyleSample] = useState("");
   const [activeProfile, setActiveProfile] = useState<string | null>(null);
 
-  // Step 2 — generated DNA
   const [dna, setDna] = useState<WritingDNA | null>(null);
   const [dnaMeta, setDnaMeta] = useState<DnaMeta | null>(null);
 
-  // Step 3 — rewrite
   const [sourceText, setSourceText] = useState(DEFAULT_SOURCE);
   const [format, setFormat] = useState<OutputFormat>("casual-message");
   const [useKnowledge, setUseKnowledge] = useState(false);
@@ -54,67 +46,60 @@ export function Studio({ restartSignal }: StudioProps) {
   const [loadingRewrite, setLoadingRewrite] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-
-  const [tutorialState, setTutorialState] = useState<TutorialState>("intro");
-  const [tutorialVisible, setTutorialVisible] = useState(false);
-  const [tutorialMounted, setTutorialMounted] = useState(false);
+  const [demoStage, setDemoStage] = useState(0);
 
   const sampleReady = styleSample.trim().length >= MIN_SAMPLE;
+  const demoProfile = DEMO_PROFILES[0];
+  const demoOutput =
+    "Hi team, we're on track to launch next week. Please let me know if you'd like early access.";
 
   useEffect(() => {
-    setTutorialMounted(true);
-    const saved = window.localStorage.getItem("writing-dna-studio-tutorial");
-    if (saved !== "skipped" && saved !== "done") {
-      setTutorialVisible(true);
-      setTutorialState("intro");
-    }
-  }, []);
+    if (flowMode !== "demo") return;
+    setDemoStage(0);
+    const timers: number[] = [];
+    timers.push(window.setTimeout(() => setDemoStage(1), 700));
+    timers.push(window.setTimeout(() => setDemoStage(2), 1800));
+    timers.push(window.setTimeout(() => setDemoStage(3), 3200));
+    return () => timers.forEach(window.clearTimeout);
+  }, [flowMode]);
 
   useEffect(() => {
     if (restartSignal === undefined) return;
-    if (!tutorialMounted) return;
-    setTutorialVisible(true);
-    setTutorialState("intro");
-  }, [restartSignal, tutorialMounted]);
+    setFlowMode("landing");
+    setWizardStep(1);
+    setDemoStage(0);
+  }, [restartSignal]);
 
-  useEffect(() => {
-    if (!tutorialVisible) return;
-    if (tutorialState === "sampleInput" && sampleReady) {
-      setTutorialState("generateDna");
-    }
-    if (tutorialState === "sourceText" && sourceText.trim().length >= 3) {
-      setTutorialState("formatSelect");
-    }
-  }, [tutorialVisible, tutorialState, sampleReady, sourceText]);
-
-  function saveTutorialStatus(status: "skipped" | "done") {
-    window.localStorage.setItem("writing-dna-studio-tutorial", status);
-    setTutorialVisible(false);
-    setTutorialState("done");
-  }
-
-  function onSampleChange(value: string) {
-    setStyleSample(value);
+  function resetForWizard() {
+    setStyleSample("");
     setActiveProfile(null);
-    // Editing the sample invalidates a previously generated DNA + rewrite.
     setDna(null);
     setDnaMeta(null);
     setResult(null);
-    if (tutorialVisible && tutorialState === "sampleInput" && value.trim().length >= MIN_SAMPLE) {
-      setTutorialState("generateDna");
-    }
+    setSourceText(DEFAULT_SOURCE);
+    setFormat("casual-message");
+    setUseKnowledge(false);
+    setRecipientName("");
+    setSenderName("");
+    setError(null);
   }
 
-  function loadDemo(p: DemoProfile) {
-    setStyleSample(p.sample);
-    setActiveProfile(p.id);
+  function handleSampleChange(value: string) {
+    setStyleSample(value);
+    setActiveProfile(null);
     setDna(null);
     setDnaMeta(null);
     setResult(null);
     setError(null);
-    if (tutorialVisible && tutorialState !== "done") {
-      setTutorialState("generateDna");
-    }
+  }
+
+  function useDemoSample() {
+    setStyleSample(demoProfile.sample);
+    setActiveProfile(demoProfile.id);
+    setError(null);
+    setDna(null);
+    setDnaMeta(null);
+    setResult(null);
   }
 
   async function handleGenerateDna() {
@@ -132,9 +117,7 @@ export function Studio({ restartSignal }: StudioProps) {
       setDna(data.dna as WritingDNA);
       const active = DEMO_PROFILES.find((p) => p.id === activeProfile);
       setDnaMeta(active ? { source: "demo", label: active.name } : { source: "user" });
-      if (tutorialVisible) {
-        setTutorialState("sourceText");
-      }
+      setWizardStep(2);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unexpected error.");
     } finally {
@@ -162,9 +145,6 @@ export function Studio({ restartSignal }: StudioProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Something went wrong.");
       setResult(data as RewriteResult);
-      if (tutorialVisible) {
-        setTutorialState("result");
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unexpected error.");
     } finally {
@@ -179,379 +159,359 @@ export function Studio({ restartSignal }: StudioProps) {
     setTimeout(() => setCopied(false), 1500);
   }
 
-  function openTutorialIntro() {
-    setTutorialVisible(true);
-    setTutorialState("intro");
-  }
-
-  function startTutorial() {
-    setTutorialVisible(true);
-    setTutorialState("sampleInput");
-  }
-
-  function startDemoWalkthrough() {
-    const demo = DEMO_PROFILES[0];
-    setStyleSample(demo.sample);
-    setActiveProfile(demo.id);
-    setDna(null);
-    setDnaMeta(null);
-    setResult(null);
-    setError(null);
+  function startDemo() {
+    resetForWizard();
+    setStyleSample(demoProfile.sample);
+    setActiveProfile(demoProfile.id);
     setSourceText(DEFAULT_SOURCE);
     setFormat("casual-message");
     setUseKnowledge(false);
-    setTutorialVisible(true);
-    setTutorialState("generateDna");
+    setFlowMode("demo");
   }
 
-  const tutorialActive = tutorialVisible && tutorialState !== "done";
-  const tutorialIntroOpen = tutorialVisible && tutorialState === "intro";
+  function startWizard() {
+    resetForWizard();
+    setFlowMode("wizard");
+    setWizardStep(1);
+  }
 
-  const sampleStepFocused = tutorialActive && tutorialState === "sampleInput";
-  const generateStepFocused = tutorialActive && tutorialState === "generateDna";
-  const sourceStepFocused = tutorialActive && tutorialState === "sourceText";
-  const formatStepFocused = tutorialActive && tutorialState === "formatSelect";
-  const rewriteStepFocused = tutorialActive && tutorialState === "rewrite";
-  const resultStepFocused = tutorialActive && tutorialState === "result";
+  function goBack() {
+    if (wizardStep > 1) {
+      setWizardStep((step) => (step - 1) as WizardStep);
+    }
+  }
 
-  return (
-    <div className="relative">
-      {tutorialIntroOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-slate-950/65" />
-          <div className="relative z-10 w-full max-w-2xl rounded-3xl border border-border bg-card p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-accent">
-                  Guided demo
-                </p>
-                <h2 className="mt-4 text-3xl font-semibold">Explore Writing DNA</h2>
-                <p className="mt-2 text-sm text-muted">See your voice transform in three simple steps.</p>
-              </div>
-              <button
-                onClick={() => saveTutorialStatus("skipped")}
-                className="rounded-full border border-border bg-background/90 px-3 py-1 text-sm font-semibold text-muted transition hover:bg-background"
-              >
-                ×
-              </button>
+  function goToRewrite() {
+    setWizardStep(3);
+  }
+
+  function renderLanding() {
+    return (
+      <div className="mx-auto flex max-w-5xl flex-col items-center justify-center gap-8 rounded-[2rem] border border-border bg-card/80 p-8 text-center shadow-xl shadow-slate-950/10 backdrop-blur-xl">
+        <div className="space-y-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accent">Writing DNA Studio</p>
+          <h1 className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
+            Turn any text into your own writing voice.
+          </h1>
+        </div>
+        <div className="grid w-full gap-4 sm:grid-cols-[1fr_auto_1fr]">
+          <div className="rounded-3xl border border-border bg-background p-6 text-left shadow-sm">
+            <p className="text-sm font-semibold">Sample text</p>
+            <p className="mt-3 text-sm text-muted">Your voice starts here.</p>
+            <div className="mt-5 h-24 rounded-3xl bg-slate-950/5 p-4 text-sm text-slate-700">
+              “hey! yeah that works for me. lemme know what time and i'll be there. no worries if plans change, just text me 👍”
             </div>
-            <div className="mt-6 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-3xl border border-border bg-background p-5 text-center transition hover:-translate-y-1 hover:shadow-md">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-3xl bg-accent-soft text-xl">
-                  📝
-                </div>
-                <p className="mt-4 text-sm font-semibold">Sample</p>
-                <p className="mt-1 text-xs text-muted">Your writing</p>
-              </div>
-              <div className="rounded-3xl border border-border bg-background p-5 text-center transition hover:-translate-y-1 hover:shadow-md">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-3xl bg-accent-soft text-xl">
-                  🧬
-                </div>
-                <p className="mt-4 text-sm font-semibold">Extract DNA</p>
-                <p className="mt-1 text-xs text-muted">Style profile</p>
-              </div>
-              <div className="rounded-3xl border border-border bg-background p-5 text-center transition hover:-translate-y-1 hover:shadow-md">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-3xl bg-accent-soft text-xl">
-                  ✨
-                </div>
-                <p className="mt-4 text-sm font-semibold">Rewrite</p>
-                <p className="mt-1 text-xs text-muted">In your voice</p>
-              </div>
-            </div>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button
-                onClick={startDemoWalkthrough}
-                className="rounded-full bg-accent px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition hover:bg-accent-2"
-              >
-                Showcase demo
-              </button>
-              <button
-                onClick={startTutorial}
-                className="rounded-full border border-border bg-background px-5 py-3 text-sm font-semibold text-foreground transition hover:border-accent"
-              >
-                Use my writing
-              </button>
-              <button
-                onClick={() => saveTutorialStatus("skipped")}
-                className="rounded-full border border-border bg-transparent px-5 py-3 text-sm font-semibold text-muted transition hover:border-rose-500 hover:text-rose-500"
-              >
-                Skip demo
-              </button>
+          </div>
+          <div className="flex flex-col items-center justify-center gap-3 px-2">
+            <div className="h-12 w-12 rounded-3xl bg-accent text-2xl leading-none text-white shadow-lg shadow-accent/20">→</div>
+            <div className="h-12 w-12 rounded-3xl bg-accent text-2xl leading-none text-white shadow-lg shadow-accent/20">→</div>
+          </div>
+          <div className="rounded-3xl border border-border bg-background p-6 text-left shadow-sm">
+            <p className="text-sm font-semibold">Rewritten voice</p>
+            <p className="mt-3 text-sm text-muted">Same meaning, more you.</p>
+            <div className="mt-5 h-24 rounded-3xl bg-slate-950/5 p-4 text-sm text-slate-700">
+              “hey, the launch is happening next week. want early access? let me know.”
             </div>
           </div>
         </div>
-      )}
-      {tutorialActive && !tutorialIntroOpen && (
-        <div className="pointer-events-none absolute inset-0 z-10 bg-slate-950/10" />
-      )}
-      <div className="grid gap-6 lg:grid-cols-2 relative z-20">
-      {/* ───────────────────────── LEFT: guided flow ───────────────────────── */}
-      <div className="flex flex-col gap-5">
-        {/* STEP 1 — paste samples */}
-        <section
-          className={`rounded-3xl border p-5 shadow-sm transition-all duration-300 relative ${
-            sampleStepFocused
-              ? "border-accent bg-accent-soft/25 shadow-[0_0_0_6px_rgba(56,189,248,0.24)]"
-              : tutorialActive
-              ? "border-border bg-card/90 opacity-70"
-              : "border-border bg-card"
-          }`}
-        >
-          <StepHeader icon="📝" label="Sample" subtitle="Your voice" />
-          {sampleStepFocused && (
-            <TutorialCallout title="Paste a sample" description="Start with your own writing or choose a demo style." />
-          )}
-          <textarea
-            value={styleSample}
-            onChange={(e) => onSampleChange(e.target.value)}
-            placeholder="Paste 2–4 sentences in your natural voice (English or 한국어)…"
-            rows={5}
-            className="mt-3 w-full resize-y rounded-xl border border-border bg-background p-3 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-          />
-          <div className="mt-2 flex items-center justify-between text-xs text-muted">
-            <span>{styleSample.trim().length} chars</span>
-            {!sampleReady && styleSample.length > 0 && (
-              <span className="text-amber-500">Keep going — more sample helps.</span>
-            )}
-          </div>
-
-          <p className="mt-3 rounded-xl bg-accent-soft/60 p-3 text-[11px] leading-snug text-muted">
-            <span className="font-semibold">Consent first.</span> Your sample is temporary and never stored.
-          </p>
-
-          <div className="mt-4 border-t border-dashed border-border pt-4">
-            <p className="mb-2 text-xs font-medium text-muted">Demo styles</p>
-            <div className="flex flex-wrap gap-2">
-              {DEMO_PROFILES.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => loadDemo(p)}
-                  title={p.blurb}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                    activeProfile === p.id
-                      ? "border-accent bg-accent-soft text-accent"
-                      : "border-border bg-background hover:border-accent/50"
-                  }`}
-                >
-                  <span aria-hidden>{p.emoji}</span>
-                  {p.name}
-                </button>
-              ))}
-            </div>
-            <p className="mt-2 text-[11px] text-muted">
-              Synthetic styles are for safe testing only — they’re fictional, not real people.
-            </p>
-          </div>
-        </section>
-
-        {/* STEP 2 — generate DNA */}
-        <section
-          className={`rounded-3xl border p-5 shadow-sm transition-all duration-300 relative ${
-            generateStepFocused
-              ? "border-accent bg-accent-soft/25 shadow-[0_0_0_6px_rgba(56,189,248,0.24)]"
-              : tutorialActive
-              ? "border-border bg-card/90 opacity-70"
-              : "border-border bg-card"
-          }`}
-        >
-          <StepHeader icon="🧬" label="Extract DNA" subtitle="Style profile" />
-          {generateStepFocused && (
-            <TutorialCallout title="Extract DNA" description="Analyze your writing into a reusable style fingerprint." />
-          )}
+        <div className="flex flex-wrap justify-center gap-3">
           <button
-            onClick={handleGenerateDna}
-            disabled={!sampleReady || loadingDna}
-            className="mt-3 w-full rounded-xl border border-accent bg-accent-soft px-5 py-3 text-sm font-semibold text-accent transition hover:bg-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={startDemo}
+            className="rounded-full border border-border bg-background px-6 py-3 text-sm font-semibold transition hover:border-accent"
           >
-            {loadingDna ? "Analyzing your voice…" : dna ? "🧬 Regenerate Writing DNA" : "🧬 Generate Writing DNA"}
+            Watch demo
           </button>
-          {dna && !loadingDna && (
-            <p className="mt-2 text-xs text-emerald-500">
-              ✓ DNA ready — see your profile on the right, then rewrite below.
-            </p>
-          )}
-        </section>
-
-        {/* STEP 3 — rewrite */}
-        <section
-          className={`rounded-3xl border p-5 shadow-sm transition-all duration-300 relative ${
-            rewriteStepFocused || formatStepFocused || sourceStepFocused
-              ? "border-accent bg-accent-soft/25 shadow-[0_0_0_6px_rgba(56,189,248,0.24)]"
-              : tutorialActive
-              ? "border-border bg-card/90 opacity-70"
-              : "border-border bg-card"
-          }`}
-        >
-          <StepHeader icon="✨" label="Rewrite" subtitle="In your voice" />
-          {(sourceStepFocused || formatStepFocused || rewriteStepFocused) && (
-            <TutorialCallout
-              title="Rewrite now"
-              description="Enter source text, choose a format, and transform it to your voice."
-            />
-          )}
-
-          <label className="mt-3 block text-xs font-medium text-muted">What do you want to say?</label>
-          <textarea
-            value={sourceText}
-            onChange={(e) => setSourceText(e.target.value)}
-            rows={3}
-            disabled={!dna}
-            className="mt-1.5 w-full resize-y rounded-xl border border-border bg-background p-3 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-50"
-          />
-
-          <p className="mt-3 mb-2 text-xs font-medium text-muted">Output format</p>
-          <div className="grid grid-cols-2 gap-2">
-            {FORMATS.map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setFormat(f.id)}
-                disabled={!dna}
-                className={`flex flex-col gap-1 rounded-xl border p-3 text-left transition disabled:opacity-50 ${
-                  format === f.id
-                    ? "border-accent bg-accent-soft"
-                    : "border-border bg-background hover:border-accent/50"
-                }`}
-              >
-                <span className="text-sm font-semibold">
-                  {f.icon} {f.label}
-                </span>
-                <span className="text-[11px] leading-snug text-muted">{f.description}</span>
-              </button>
-            ))}
-          </div>
-
-          {format === "professional-email" && (
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <input
-                value={recipientName}
-                onChange={(e) => setRecipientName(e.target.value)}
-                placeholder="Recipient name"
-                disabled={!dna}
-                className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-50"
-              />
-              <input
-                value={senderName}
-                onChange={(e) => setSenderName(e.target.value)}
-                placeholder="Your name"
-                disabled={!dna}
-                className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-50"
-              />
-            </div>
-          )}
-
-          <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-xl border border-dashed border-border bg-background p-3">
-            <input
-              type="checkbox"
-              checked={useKnowledge}
-              onChange={(e) => setUseKnowledge(e.target.checked)}
-              disabled={!dna}
-              className="mt-0.5 h-4 w-4 accent-accent"
-            />
-            <span className="text-xs leading-snug text-muted">
-              <span className="font-medium text-foreground">Ground with knowledge layer</span>
-              <br />
-              Weave in relevant facts. Uses a <strong>mock</strong> index today —{" "}
-              <span className="text-accent">Microsoft Foundry IQ</span> in production.
-            </span>
-          </label>
-
           <button
-            onClick={handleRewrite}
-            disabled={!dna || loadingRewrite || sourceText.trim().length < 3}
-            className="mt-4 w-full overflow-hidden rounded-xl bg-linear-to-r from-accent to-accent-2 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={startWizard}
+            className="rounded-full bg-accent px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition hover:bg-accent-2"
           >
-            {loadingRewrite ? "Rewriting in your voice…" : "✨ Rewrite in my voice"}
+            Let&apos;s start
           </button>
-        </section>
-
-        {error && <p className="text-sm text-rose-500">{error}</p>}
+        </div>
       </div>
+    );
+  }
 
-      {/* ───────────────────────── RIGHT: results ───────────────────────── */}
-      <div className="flex flex-col gap-5">
-        {!dna && !loadingDna && <EmptyState />}
-        {loadingDna && <DnaLoadingState />}
-
-        {dna && (
-          <DnaProfileCard
-            dna={dna}
-            title={dnaMeta?.source === "demo" ? dnaMeta.label : "Your Writing DNA"}
-            badge={dnaMeta?.source === "demo" ? "Demo style" : undefined}
-          />
-        )}
-
-        {loadingRewrite && <RewriteLoadingState />}
-
-        {result && !loadingRewrite && (
-          <>
-            <section
-              className={`rounded-2xl border p-5 shadow-sm transition relative ${
-                resultStepFocused
-                  ? "border-accent bg-accent-soft/20 shadow-[0_0_0_4px_rgba(56,189,248,0.25)]"
-                  : "border-border bg-card"
-              } ${tutorialActive && !resultStepFocused ? "opacity-60" : ""}`}
-            >
-              {resultStepFocused && (
-                <TutorialCallout
-                  title="Review your rewrite"
-                  description="Copy the rewritten text and finish the tutorial when you’re ready."
-                  action={
-                    <button
-                      onClick={() => saveTutorialStatus("done")}
-                      className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent-2"
-                    >
-                      Finish tutorial
-                    </button>
-                  }
-                />
+  function renderDemo() {
+    return (
+      <div className="mx-auto flex max-w-5xl flex-col gap-6 rounded-[2rem] border border-border bg-card/80 p-8 shadow-xl shadow-slate-950/10 backdrop-blur-xl">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accent">Demo</p>
+            <h2 className="text-3xl font-semibold text-foreground">Watch the flow</h2>
+          </div>
+          <button
+            onClick={startWizard}
+            className="rounded-full border border-border bg-background px-4 py-2 text-sm font-semibold transition hover:border-accent"
+          >
+            Start my own
+          </button>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div className={`rounded-3xl border p-5 text-left transition ${demoStage === 0 ? "border-accent bg-accent-soft/25 shadow-lg shadow-accent/10" : "border-border bg-background"}`}>
+            <p className="text-sm font-semibold">1. Sample</p>
+            <p className="mt-2 text-xs text-muted">Voice source</p>
+            <div className="mt-4 h-24 rounded-3xl bg-slate-950/5 p-4 text-sm text-slate-700">
+              {demoProfile.sample}
+            </div>
+          </div>
+          <div className={`rounded-3xl border p-5 text-left transition ${demoStage === 1 ? "border-accent bg-accent-soft/25 shadow-lg shadow-accent/10" : "border-border bg-background"}`}>
+            <p className="text-sm font-semibold">2. DNA</p>
+            <p className="mt-2 text-xs text-muted">Style traits</p>
+            <div className="mt-4 space-y-2 text-sm text-slate-700">
+              {demoStage >= 1 ? (
+                <>
+                  <div className="rounded-2xl bg-white/90 p-3 shadow-sm">Warmth · High</div>
+                  <div className="rounded-2xl bg-white/90 p-3 shadow-sm">Rhythm · Punchy</div>
+                </>
+              ) : (
+                <div className="h-16 rounded-2xl bg-slate-950/5" />
               )}
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold">Rewritten output</h3>
+            </div>
+          </div>
+          <div className={`rounded-3xl border p-5 text-left transition ${demoStage >= 2 ? "border-accent bg-accent-soft/25 shadow-lg shadow-accent/10" : "border-border bg-background"}`}>
+            <p className="text-sm font-semibold">3. Rewrite</p>
+            <p className="mt-2 text-xs text-muted">Ready output</p>
+            <div className="mt-4 h-24 rounded-3xl bg-slate-950/5 p-4 text-sm text-slate-700">
+              {demoStage >= 2 ? demoOutput : ""}
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 flex items-center gap-3">
+          {[0, 1, 2, 3].map((stage) => (
+            <span key={stage} className={`h-2 w-8 rounded-full transition ${demoStage === stage ? "bg-accent" : "bg-border"}`} />
+          ))}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            onClick={() => setFlowMode("landing")}
+            className="rounded-full border border-border bg-background px-5 py-3 text-sm font-semibold transition hover:border-accent"
+          >
+            Back to start
+          </button>
+          <button
+            onClick={() => setFlowMode("wizard")}
+            className="rounded-full bg-accent px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition hover:bg-accent-2"
+          >
+            Use my writing
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderWizard() {
+    const stepLabels = ["Sample", "DNA", "Rewrite"];
+    return (
+      <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="space-y-6">
+          <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accent">Step {wizardStep} of 3</p>
+                <h2 className="mt-3 text-3xl font-semibold text-foreground">
+                  {wizardStep === 1 ? "Add your samples" : wizardStep === 2 ? "Review your DNA" : "Rewrite in your voice"}
+                </h2>
+              </div>
+              <button
+                onClick={() => setFlowMode("landing")}
+                className="rounded-full border border-border bg-background px-3 py-2 text-sm font-semibold transition hover:border-accent"
+              >
+                Restart
+              </button>
+            </div>
+            <div className="mt-6 flex items-center gap-3">
+              {stepLabels.map((label, index) => {
+                const step = index + 1;
+                const active = step === wizardStep;
+                return (
+                  <div key={label} className="flex items-center gap-3">
+                    <div className={`grid h-9 w-9 place-items-center rounded-full text-sm font-semibold ${active ? "bg-accent text-white" : "border border-border text-muted"}`}>
+                      {step}
+                    </div>
+                    <span className={`text-xs uppercase tracking-[0.22em] ${active ? "text-foreground" : "text-muted"}`}>{label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {wizardStep === 1 && (
+            <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+              <textarea
+                value={styleSample}
+                onChange={(e) => handleSampleChange(e.target.value)}
+                placeholder="Paste 2–4 sentences in your natural voice (English or 한국어)…"
+                rows={8}
+                className="w-full resize-y rounded-3xl border border-border bg-background p-4 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+              />
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                 <button
-                  onClick={copyOutput}
-                  className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium transition hover:border-accent hover:text-accent"
+                  onClick={useDemoSample}
+                  className="rounded-full border border-border bg-background px-4 py-2 text-sm font-semibold transition hover:border-accent"
                 >
-                  {copied ? "Copied ✓" : "Copy"}
+                  Use demo sample
+                </button>
+                <button
+                  onClick={handleGenerateDna}
+                  disabled={!sampleReady || loadingDna}
+                  className="rounded-full bg-accent px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition hover:bg-accent-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {loadingDna ? "Analyzing…" : "Generate my Writing DNA"}
                 </button>
               </div>
-              <div className="whitespace-pre-wrap rounded-xl bg-accent-soft/60 p-4 text-sm leading-relaxed">
-                {result.output}
-              </div>
+            </div>
+          )}
 
-              <details className="mt-3 text-xs text-muted">
-                <summary className="cursor-pointer select-none font-medium">
-                  How it was rewritten ({result.appliedTransforms.length} steps)
-                </summary>
-                <ul className="mt-2 list-disc space-y-1 pl-5">
-                  {result.appliedTransforms.map((t, i) => (
-                    <li key={i}>{t}</li>
-                  ))}
-                </ul>
-              </details>
-
-              {useKnowledge && (
-                <div className="mt-3 rounded-lg border border-dashed border-border p-3 text-xs text-muted">
-                  <span className="font-medium text-foreground">Knowledge layer:</span>{" "}
-                  {result.knowledge.note}
-                  {result.knowledge.facts.map((f) => (
-                    <div key={f.source} className="mt-1.5 font-mono text-[11px]">
-                      • {f.claim}{" "}
-                      <span className="opacity-60">
-                        ({f.source}, {Math.round(f.confidence * 100)}%)
-                      </span>
-                    </div>
-                  ))}
+          {wizardStep === 2 && (
+            <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+              {dna ? (
+                <DnaProfileCard
+                  dna={dna}
+                  title={dnaMeta?.source === "demo" ? dnaMeta.label : "Your Writing DNA"}
+                  badge={dnaMeta?.source === "demo" ? "Demo style" : undefined}
+                />
+              ) : (
+                <div className="rounded-3xl border border-dashed border-border bg-background p-8 text-center text-sm text-muted">
+                  Generate your Writing DNA to review it here.
                 </div>
               )}
-            </section>
+              <div className="mt-6 flex items-center justify-between gap-3">
+                <button
+                  onClick={goBack}
+                  className="rounded-full border border-border bg-background px-4 py-2 text-sm font-semibold transition hover:border-accent"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={goToRewrite}
+                  disabled={!dna}
+                  className="rounded-full bg-accent px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition hover:bg-accent-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Continue to rewrite
+                </button>
+              </div>
+            </div>
+          )}
 
-            <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+          {wizardStep === 3 && (
+            <div className="space-y-6 rounded-3xl border border-border bg-card p-6 shadow-sm">
+              <div className="grid gap-4">
+                <label className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Source text</label>
+                <textarea
+                  value={sourceText}
+                  onChange={(e) => setSourceText(e.target.value)}
+                  rows={5}
+                  disabled={!dna}
+                  className="w-full resize-y rounded-3xl border border-border bg-background p-4 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-50"
+                />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                {FORMATS.map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setFormat(f.id)}
+                    disabled={!dna}
+                    className={`rounded-3xl border p-4 text-left text-sm transition disabled:opacity-50 ${
+                      format === f.id
+                        ? "border-accent bg-accent-soft"
+                        : "border-border bg-background hover:border-accent/50"
+                    }`}
+                  >
+                    <div className="font-semibold">{f.icon} {f.label}</div>
+                    <div className="mt-1 text-xs text-muted">{f.description}</div>
+                  </button>
+                ))}
+              </div>
+
+              {format === "professional-email" && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <input
+                    value={recipientName}
+                    onChange={(e) => setRecipientName(e.target.value)}
+                    placeholder="Recipient name"
+                    disabled={!dna}
+                    className="rounded-3xl border border-border bg-background px-4 py-3 text-sm outline-none focus:border-accent disabled:opacity-50"
+                  />
+                  <input
+                    value={senderName}
+                    onChange={(e) => setSenderName(e.target.value)}
+                    placeholder="Your name"
+                    disabled={!dna}
+                    className="rounded-3xl border border-border bg-background px-4 py-3 text-sm outline-none focus:border-accent disabled:opacity-50"
+                  />
+                </div>
+              )}
+
+              <div className="flex flex-col gap-3 rounded-3xl border border-dashed border-border bg-background p-4 text-xs text-muted">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={useKnowledge}
+                    onChange={(e) => setUseKnowledge(e.target.checked)}
+                    disabled={!dna}
+                    className="h-4 w-4 accent-accent"
+                  />
+                  Ground with mock knowledge
+                </label>
+                <p>{useKnowledge ? "Uses a mock knowledge layer for demo grounding." : "Knowledge is off by default."}</p>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <button
+                  onClick={goBack}
+                  className="rounded-full border border-border bg-background px-4 py-3 text-sm font-semibold transition hover:border-accent"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleRewrite}
+                  disabled={!dna || loadingRewrite || sourceText.trim().length < 3}
+                  className="rounded-full bg-accent px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition hover:bg-accent-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {loadingRewrite ? "Rewriting…" : "Rewrite in my voice"}
+                </button>
+              </div>
+
+              {result && !loadingRewrite && (
+                <div className="space-y-4 rounded-3xl border border-border bg-background p-5">
+                  <div className="rounded-3xl bg-white p-4 text-sm leading-relaxed text-slate-700 shadow-sm">{result.output}</div>
+                  <ScoreBreakdown score={result.score} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {error && <p className="text-sm text-rose-500">{error}</p>}
+        </div>
+
+        <div className="space-y-6">
+          {wizardStep === 2 && dna && (
+            <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+              <p className="text-sm font-semibold text-foreground">Next step</p>
+              <p className="mt-2 text-sm text-muted">Rewrite your message using this DNA profile.</p>
+              <div className="mt-4 rounded-3xl border border-border bg-background p-4 text-sm text-slate-700">
+                {sourceText.length > 120 ? `${sourceText.slice(0, 120)}…` : sourceText}
+              </div>
+            </div>
+          )}
+          {wizardStep === 3 && result && (
+            <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+              <h3 className="text-sm font-semibold">Style match</h3>
               <ScoreBreakdown score={result.score} />
-            </section>
-          </>
-        )}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-6xl px-6 py-10">
+      {flowMode === "landing" && renderLanding()}
+      {flowMode === "demo" && renderDemo()}
+      {flowMode === "wizard" && renderWizard()}
     </div>
   );
 }
@@ -598,12 +558,11 @@ function TutorialCallout({
 
 function EmptyState() {
   return (
-    <div className="flex h-full min-h-85 flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center">
+    <div className="flex h-full min-h-[21rem] flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center">
       <div className="dna-strand mb-4 h-12 w-12 rounded-xl" />
       <p className="text-sm font-medium">Your Writing DNA will appear here</p>
       <p className="mt-1 max-w-xs text-xs text-muted">
-        Paste your writing (or try a demo style), then hit{" "}
-        <span className="font-medium text-accent">Generate Writing DNA</span>.
+        Paste your writing (or try a demo style), then hit <span className="font-medium text-accent">Generate Writing DNA</span>.
       </p>
     </div>
   );
