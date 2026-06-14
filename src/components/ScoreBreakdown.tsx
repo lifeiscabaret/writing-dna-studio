@@ -6,62 +6,29 @@ function scoreColor(score: number): string {
   return "text-rose-500";
 }
 
-function ScoreRing({ value }: { value: number }) {
-  const radius = 38;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (value / 100) * circumference;
-  return (
-    <div className="relative h-20 w-20 shrink-0">
-      <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
-        <circle cx="50" cy="50" r={radius} fill="none" strokeWidth="9" className="stroke-accent-soft" />
-        <circle
-          cx="50"
-          cy="50"
-          r={radius}
-          fill="none"
-          strokeWidth="9"
-          strokeLinecap="round"
-          stroke="url(#scoreGrad)"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          className="transition-[stroke-dashoffset] duration-1000 ease-out"
-        />
-        <defs>
-          <linearGradient id="scoreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="var(--accent)" />
-            <stop offset="100%" stopColor="var(--accent-2)" />
-          </linearGradient>
-        </defs>
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-xl font-bold leading-none">{value}</span>
-        <span className="text-[9px] uppercase tracking-wide text-muted">match</span>
-      </div>
-    </div>
-  );
-}
-
+/**
+ * Voice match presented as a small, unobtrusive trust badge. The full
+ * dimension breakdown stays collapsed behind "Details" so the rewrite — not the
+ * scoring — is the focus.
+ */
 export function ScoreBreakdown({ score }: { score: StyleMatchScore }) {
   return (
-    <div>
-      <div className="flex items-center gap-4">
-        <ScoreRing value={score.overall} />
-        <div>
-          <p className="text-sm font-semibold">Voice match</p>
-          <p className="mt-1 text-xs leading-5 text-muted">
-            How closely this rewrite follows your Writing DNA.
-          </p>
-        </div>
-      </div>
+    <details className="group inline-block">
+      <summary className="flex w-fit cursor-pointer list-none items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent-soft px-3 py-1 text-xs font-semibold text-accent">
+          <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+          Voice match {score.overall}%
+        </span>
+        <span className="text-[11px] font-medium text-muted underline-offset-2 group-open:underline">
+          Details
+        </span>
+      </summary>
 
-      {score.verdict && <p className="mt-3 text-xs text-muted">{score.verdict}</p>}
-
-      <details className="group mt-4 rounded-2xl border border-border bg-background/60">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-xs font-semibold text-foreground">
-          See voice match details
-          <span className="text-muted transition group-open:rotate-180">▾</span>
-        </summary>
-        <div className="flex flex-col gap-3 px-4 pb-4">
+      <div className="mt-3 w-72 max-w-full rounded-2xl border border-border bg-background p-4">
+        <p className="mb-3 text-[11px] leading-5 text-muted">
+          How closely this rewrite follows your Writing DNA.
+        </p>
+        <div className="flex flex-col gap-3">
           {score.dimensions.map((d) => (
             <div key={d.label}>
               <div className="mb-1 flex items-center justify-between text-xs">
@@ -78,7 +45,8 @@ export function ScoreBreakdown({ score }: { score: StyleMatchScore }) {
             </div>
           ))}
         </div>
-      </details>
-    </div>
+        {score.verdict && <p className="mt-3 text-[11px] italic text-muted">{score.verdict}</p>}
+      </div>
+    </details>
   );
 }
