@@ -1,26 +1,77 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fafaff;
+  --foreground: #16121f;
+  --card: #ffffff;
+  --border: #e9e6f2;
+  --muted: #6b6680;
+  --accent: #7c3aed;
+  --accent-2: #ec4899;
+  --accent-soft: #f3eeff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-accent-soft: var(--accent-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0c0a14;
+    --foreground: #ece9f5;
+    --card: #15121f;
+    --border: #2a2436;
+    --muted: #9a93ad;
+    --accent: #a78bfa;
+    --accent-2: #f472b6;
+    --accent-soft: #1d1830;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Subtle aurora backdrop for the hero. */
+.aurora {
+  background:
+    radial-gradient(60% 60% at 15% 10%, color-mix(in oklab, var(--accent) 22%, transparent), transparent 70%),
+    radial-gradient(50% 50% at 90% 0%, color-mix(in oklab, var(--accent-2) 20%, transparent), transparent 70%);
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--accent-soft) 90%, transparent) 25%,
+    color-mix(in oklab, var(--accent) 18%, transparent) 50%,
+    color-mix(in oklab, var(--accent-soft) 90%, transparent) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.dna-strand {
+  background-image: repeating-linear-gradient(
+    115deg,
+    color-mix(in oklab, var(--accent) 70%, transparent),
+    color-mix(in oklab, var(--accent) 70%, transparent) 2px,
+    transparent 2px,
+    transparent 9px
+  );
 }
