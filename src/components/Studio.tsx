@@ -475,9 +475,45 @@ export function Studio({ restartSignal }: StudioProps) {
               </div>
 
               {result && !loadingRewrite && (
-                <div className="space-y-4 rounded-3xl border border-border bg-background p-5">
-                  <div className="rounded-3xl bg-white p-4 text-sm leading-relaxed text-slate-700 shadow-sm">{result.output}</div>
-                  <ScoreBreakdown score={result.score} />
+                <div className="rounded-3xl border-2 border-accent/30 bg-card p-6 shadow-lg shadow-accent/10">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-accent">Rewritten output</p>
+                      <h3 className="mt-1 text-xl font-semibold text-foreground">This is your text, in your voice</h3>
+                    </div>
+                    <button
+                      onClick={copyOutput}
+                      className="shrink-0 rounded-full border border-border bg-background px-4 py-2 text-sm font-semibold transition hover:border-accent"
+                    >
+                      {copied ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+
+                  <div className="mt-4 whitespace-pre-wrap rounded-3xl bg-white p-5 text-base leading-relaxed text-slate-800 shadow-sm">
+                    {result.output}
+                  </div>
+
+                  {result.appliedTransforms.length > 0 && (
+                    <div className="mt-6">
+                      <p className="text-sm font-semibold text-foreground">Why it sounds like you</p>
+                      <ul className="mt-3 flex flex-col gap-2">
+                        {result.appliedTransforms.slice(0, 3).map((transform) => (
+                          <li key={transform} className="flex items-start gap-2 text-sm text-muted">
+                            <span className="mt-0.5 text-accent">✓</span>
+                            <span>{transform}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleRewrite}
+                    disabled={loadingRewrite}
+                    className="mt-6 rounded-full border border-border bg-background px-4 py-2 text-sm font-semibold transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Make it sound more like me
+                  </button>
                 </div>
               )}
             </div>
@@ -497,8 +533,7 @@ export function Studio({ restartSignal }: StudioProps) {
             </div>
           )}
           {wizardStep === 3 && result && (
-            <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
-              <h3 className="text-sm font-semibold">Style match</h3>
+            <div className="rounded-3xl border border-border bg-card p-5 shadow-sm">
               <ScoreBreakdown score={result.score} />
             </div>
           )}
