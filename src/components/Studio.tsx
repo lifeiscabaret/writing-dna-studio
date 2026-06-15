@@ -14,14 +14,21 @@ import { ScoreBreakdown } from "./ScoreBreakdown";
 const DEFAULT_SOURCE = "Can you send me the launch details?";
 const MIN_SAMPLE = 20;
 
+export type Refinement =
+  | "warmer"
+  | "shorter"
+  | "more confident"
+  | "more casual"
+  | "more polished";
+
 /** One-tap refinements. A couple switch format (a real change today); the rest
  *  re-run the rewrite as a regeneration hook for future tone controls. */
-const REFINEMENTS: { label: string; format?: OutputFormat }[] = [
-  { label: "Warmer" },
-  { label: "Shorter" },
-  { label: "More confident" },
-  { label: "More casual", format: "casual-message" },
-  { label: "More polished", format: "professional-email" },
+const REFINEMENTS: { label: string; format?: OutputFormat; id: Refinement }[] = [
+  { label: "Warmer", id: "warmer" },
+  { label: "Shorter", id: "shorter" },
+  { label: "More confident", id: "more confident" },
+  { label: "More casual", format: "casual-message", id: "more casual" },
+  { label: "More polished", format: "professional-email", id: "more polished" },
 ];
 
 type Stage = "landing" | "teach" | "compose";
@@ -45,9 +52,25 @@ function voiceChips(dna: WritingDNA): string[] {
   return Array.from(new Set(chips)).slice(0, 6);
 }
 
+/** Subtle status color for an agent-trace step dot. */
+function traceDotColor(status: string): string {
+  switch (status) {
+    case "connected":
+      return "bg-emerald-500";
+    case "fallback":
+      return "bg-amber-500";
+    case "skipped":
+      return "bg-slate-300";
+    case "failed":
+      return "bg-rose-500";
+    default:
+      return "bg-accent";
+  }
+}
+
 export function Studio() {
   const [stage, setStage] = useState<Stage>("landing");
-  const [heroKey, setHeroKey] = useState(0);
+  const [heroKey] = useState(0);
 
   const [styleSample, setStyleSample] = useState("");
   const [activeProfile, setActiveProfile] = useState<string | null>(null);
@@ -56,7 +79,7 @@ export function Studio() {
 
   const [sourceText, setSourceText] = useState(DEFAULT_SOURCE);
   const [format, setFormat] = useState<OutputFormat>("casual-message");
-  const [useKnowledge, setUseKnowledge] = useState(false);
+  const [useKnowledge, setUseKnowledge] = useState(true);
   const [recipientName, setRecipientName] = useState("");
   const [senderName, setSenderName] = useState("");
   const [sentDraft, setSentDraft] = useState("");
@@ -66,6 +89,7 @@ export function Studio() {
   const [loadingRewrite, setLoadingRewrite] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const demoProfile = DEMO_PROFILES[0];
   const sampleReady = styleSample.trim().length >= MIN_SAMPLE;
@@ -79,7 +103,7 @@ export function Studio() {
     setResult(null);
     setSourceText(DEFAULT_SOURCE);
     setFormat("casual-message");
-    setUseKnowledge(false);
+    setUseKnowledge(true);
     setRecipientName("");
     setSenderName("");
     setSentDraft("");
@@ -126,11 +150,12 @@ export function Studio() {
     }
   }
 
-  async function handleRewrite(formatOverride?: OutputFormat) {
+  async function handleRewrite(formatOverride?: OutputFormat, refinement?: Refinement) {
     const effectiveFormat = formatOverride ?? format;
     setLoadingRewrite(true);
     setError(null);
     setCopied(false);
+    setStatusMessage(null);
     setSentDraft(sourceText.trim());
     try {
       const res = await fetch("/api/rewrite", {
@@ -143,6 +168,7 @@ export function Studio() {
           useKnowledge,
           recipientName,
           senderName,
+          refinement,
         }),
       });
       const data = await res.json();
@@ -155,16 +181,41 @@ export function Studio() {
     }
   }
 
-  function refine(formatOverride?: OutputFormat) {
+  function refine(refinement?: Refinement, formatOverride?: OutputFormat) {
     if (formatOverride) setFormat(formatOverride);
-    void handleRewrite(formatOverride);
+    void handleRewrite(formatOverride, refinement);
   }
 
   async function copyOutput() {
     if (!result) return;
     await navigator.clipboard.writeText(result.output);
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    setStatusMessage("Copied — ready to paste anywhere.");
+    setTimeout(() => {
+      setCopied(false);
+      setStatusMessage(null);
+    }, 2000);
+  }
+
+  async function shareOutput() {
+    if (!result) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({ text: result.output });
+        setStatusMessage("Shared successfully.");
+      } else {
+        await navigator.clipboard.writeText(result.output);
+        setStatusMessage("Copied — ready to paste anywhere.");
+      }
+    } catch {
+      await navigator.clipboard.writeText(result.output);
+      setStatusMessage("Copied — ready to paste anywhere.");
+    }
+    setCopied(true);
+    setTimeout(() => {
+      setCopied(false);
+      setStatusMessage(null);
+    }, 2000);
   }
 
   function startTeaching() {
@@ -215,6 +266,7 @@ export function Studio() {
   // ------------------------------------------------------------------ Teach
   function renderTeach() {
     const chips = dna ? voiceChips(dna) : [];
+    const sampleConfidence = dna ? dna.sampleWordCount >= 40 : false;
     return (
       <ChatPanel title="Voice setup" subtitle="Teach me how you write" onRestart={resetAll}>
         <div className="flex flex-col gap-3">
@@ -244,18 +296,27 @@ export function Studio() {
                   <span className="voice-pulse grid h-6 w-6 place-items-center rounded-full bg-accent text-xs text-white">
                     ✓
                   </span>
-                  <span className="font-medium text-foreground">Got it. I learned your voice.</span>
+                  <span className="font-medium text-foreground">
+                    {sampleConfidence ? "Got it. I learned your voice." : "Got it. I’m still learning your voice."}
+                  </span>
                 </span>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {chips.map((c, i) => (
-                    <span
-                      key={c}
-                      className="chip-in rounded-full bg-accent-soft px-2.5 py-1 text-[11px] font-medium text-accent"
-                      style={{ animationDelay: `${300 + i * 90}ms` }}
-                    >
-                      {c}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap gap-1.5">
+                    {chips.map((c, i) => (
+                      <span
+                        key={c}
+                        className="chip-in rounded-full bg-accent-soft px-2.5 py-1 text-[11px] font-medium text-accent"
+                        style={{ animationDelay: `${300 + i * 90}ms` }}
+                      >
+                        {c}
+                      </span>
+                    ))}
+                  </div>
+                  {!sampleConfidence && (
+                    <span className="rounded-full bg-rose-50 px-2 py-1 text-[10px] font-semibold text-rose-600">
+                      Low-confidence sample
                     </span>
-                  ))}
+                  )}
                 </div>
 
                 <details className="group mt-3">
@@ -371,10 +432,25 @@ export function Studio() {
           )}
 
           {result && !loadingRewrite && (
-            <Bubble role="assistant" className="!max-w-[92%]">
+            <Bubble role="assistant" className="max-w-[92%]!">
               <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-foreground">
                 {result.output}
               </p>
+
+              <div className="mt-2">
+                {result.provider.engine === "azure" ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold text-accent">
+                    ✨ Azure {result.provider.model ?? "Foundry"}
+                  </span>
+                ) : (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+                    title={result.provider.error ?? undefined}
+                  >
+                    ⚙️ Local engine{result.provider.error ? " · Azure unavailable" : ""}
+                  </span>
+                )}
+              </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button
@@ -383,8 +459,18 @@ export function Studio() {
                 >
                   {copied ? "✓ Copied" : "Copy"}
                 </button>
+                <button
+                  onClick={shareOutput}
+                  className="rounded-full border border-border bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-accent"
+                >
+                  Share
+                </button>
                 <ScoreBreakdown score={result.score} />
               </div>
+
+              {statusMessage && (
+                <p className="mt-2 text-[11px] text-muted">{statusMessage}</p>
+              )}
 
               {result.appliedTransforms.length > 0 && (
                 <p className="mt-3 text-[11px] leading-5 text-muted">
@@ -398,7 +484,7 @@ export function Studio() {
                   {REFINEMENTS.map((r) => (
                     <button
                       key={r.label}
-                      onClick={() => refine(r.format)}
+                      onClick={() => refine(r.id, r.format)}
                       disabled={loadingRewrite}
                       className="rounded-full border border-border bg-background px-3 py-1 text-[11px] font-medium transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
                     >
@@ -413,7 +499,7 @@ export function Studio() {
                 <div className="mt-3 space-y-3">
                   {result.agentTrace.map((step) => (
                     <div key={step.name} className="flex gap-3">
-                      <span className="mt-1 h-2.5 w-2.5 rounded-full bg-accent" />
+                      <span className={`mt-1 h-2.5 w-2.5 rounded-full ${traceDotColor(step.status)}`} />
                       <div>
                         <p className="text-[12px] font-semibold">{step.name}</p>
                         <p className="text-[11px] text-muted">{step.detail}</p>
@@ -489,7 +575,7 @@ export function Studio() {
                 onChange={(e) => setUseKnowledge(e.target.checked)}
                 className="h-3 w-3 accent-accent"
               />
-              Ground with knowledge
+              Ground with style guide
             </label>
           }
         />
@@ -505,9 +591,9 @@ export function Studio() {
       {stage === "teach" && renderTeach()}
       {stage === "compose" && renderCompose()}
 
-      {copied && (
+      {statusMessage && (
         <div className="toast-in fixed bottom-8 left-1/2 z-50 rounded-full bg-foreground px-4 py-2 text-xs font-semibold text-background shadow-lg">
-          Copied to clipboard
+          {statusMessage}
         </div>
       )}
     </div>
@@ -530,7 +616,7 @@ function ChatPanel({
   header?: ReactNode;
 }) {
   return (
-    <div className="mx-auto flex max-w-xl flex-col overflow-hidden rounded-[2rem] border border-border bg-card/80 shadow-xl shadow-slate-950/10 backdrop-blur-xl">
+    <div className="mx-auto flex max-w-xl flex-col overflow-hidden rounded-4xl border border-border bg-card/80 shadow-xl shadow-slate-950/10 backdrop-blur-xl">
       <div className="flex items-center justify-between gap-3 border-b border-border bg-card/60 px-5 py-4">
         <div className="flex items-center gap-3">
           <span className="dna-strand h-9 w-9 rounded-2xl" aria-hidden />
@@ -639,7 +725,7 @@ function Composer({
 /** The landing hero — a self-playing chat that demos the core loop (CSS-only). */
 function HeroChat() {
   return (
-    <div className="w-full overflow-hidden rounded-[2rem] border border-border bg-card/80 shadow-xl shadow-slate-950/10 backdrop-blur-xl">
+    <div className="w-full overflow-hidden rounded-4xl border border-border bg-card/80 shadow-xl shadow-slate-950/10 backdrop-blur-xl">
       <div className="flex items-center gap-3 border-b border-border bg-card/60 px-5 py-3">
         <span className="dna-strand h-8 w-8 rounded-2xl" aria-hidden />
         <div className="text-left">
