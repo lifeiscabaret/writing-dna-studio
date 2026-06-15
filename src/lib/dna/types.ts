@@ -94,8 +94,10 @@ export interface KnowledgeFact {
 
 export interface KnowledgeResult {
   facts: KnowledgeFact[];
-  /** True once a real grounding provider (Foundry IQ) is wired in. */
+  /** True when a provider-backed grounding step (Foundry / Azure) produced these facts. */
   grounded: boolean;
+  /** Which path produced this result — distinguishes Foundry grounding from the local fallback. */
+  engine: "foundry" | "local" | "disabled";
   note: string;
 }
 

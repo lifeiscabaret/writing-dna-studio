@@ -4,10 +4,11 @@ export type AgentName =
   | "Voice Profile Agent"
   | "Intent Agent"
   | "Knowledge Grounding Agent"
+  | "Azure Foundry Provider"
   | "Rewrite Agent"
   | "Evaluation Harness Agent";
 
-export type AgentStatus = "completed" | "skipped" | "failed";
+export type AgentStatus = "completed" | "skipped" | "failed" | "connected" | "fallback";
 
 export interface AgentTraceStep {
   name: AgentName;
@@ -49,8 +50,25 @@ export interface EvaluationResult {
   passed: boolean;
 }
 
+export type Refinement =
+  | "warmer"
+  | "shorter"
+  | "more confident"
+  | "more casual"
+  | "more polished";
+
+export interface ProviderStatus {
+  /** Which engine actually produced the visible output. */
+  engine: "azure" | "local";
+  /** The Azure deployment used, when engine === "azure". */
+  model?: string;
+  /** The failure reason when Azure was attempted but fell back to local. */
+  error?: string;
+}
+
 export interface AgentPipelineResult extends RewriteResult {
   intent: IntentResult;
   evaluation: EvaluationResult;
   agentTrace: AgentTraceStep[];
+  provider: ProviderStatus;
 }
