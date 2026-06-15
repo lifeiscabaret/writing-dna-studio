@@ -1,120 +1,131 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import {
   DEMO_PROFILES,
   FORMATS,
-  type DemoProfile,
   type OutputFormat,
-  type RewriteResult,
   type WritingDNA,
 } from "@/lib/dna";
-
-interface StudioProps {
-  restartSignal?: number;
-}
+import type { AgentPipelineResult } from "@/lib/agents";
 import { DnaProfileCard } from "./DnaProfileCard";
 import { ScoreBreakdown } from "./ScoreBreakdown";
 
-const DEFAULT_SOURCE =
-  "We are launching our new product next week. Please let me know if you would like to be added to the early access list, as availability is limited.";
-
+const DEFAULT_SOURCE = "Can you send me the launch details?";
 const MIN_SAMPLE = 20;
 
+export type Refinement =
+  | "warmer"
+  | "shorter"
+  | "more confident"
+  | "more casual"
+  | "more polished";
+
+/** One-tap refinements. A couple switch format (a real change today); the rest
+ *  re-run the rewrite as a regeneration hook for future tone controls. */
+const REFINEMENTS: { label: string; format?: OutputFormat; id: Refinement }[] = [
+  { label: "Warmer", id: "warmer" },
+  { label: "Shorter", id: "shorter" },
+  { label: "More confident", id: "more confident" },
+  { label: "More casual", format: "casual-message", id: "more casual" },
+  { label: "More polished", format: "professional-email", id: "more polished" },
+];
+
+type Stage = "landing" | "teach" | "compose";
 type DnaMeta = { source: "user" } | { source: "demo"; label: string };
 
-type TutorialState =
-  | "intro"
-  | "sampleInput"
-  | "generateDna"
-  | "sourceText"
-  | "formatSelect"
-  | "rewrite"
-  | "result"
-  | "done";
+/** Distil the DNA into a few friendly, human-readable chips. */
+function voiceChips(dna: WritingDNA): string[] {
+  const chips: string[] = [];
+  chips.push(dna.axes.formality >= 60 ? "polished" : "casual");
+  if (dna.axes.warmth >= 55) chips.push("warm");
+  if (dna.axes.directness >= 58) chips.push("direct");
+  if (dna.metrics.avgSentenceLength <= 11) chips.push("short rhythm");
+  else if (dna.metrics.avgSentenceLength >= 20) chips.push("flowing");
+  if (dna.axes.energy >= 62) chips.push("high energy");
+  if (dna.axes.playfulness >= 55) chips.push("playful");
+  if (dna.usesEmoji && dna.metrics.emojiRate >= 0.5) chips.push("emoji-friendly");
+  for (const t of dna.toneTags) {
+    if (chips.length >= 6) break;
+    if (!chips.includes(t)) chips.push(t);
+  }
+  return Array.from(new Set(chips)).slice(0, 6);
+}
 
-export function Studio({ restartSignal }: StudioProps) {
-  // Step 1 — samples
+/** Subtle status color for an agent-trace step dot. */
+function traceDotColor(status: string): string {
+  switch (status) {
+    case "connected":
+      return "bg-emerald-500";
+    case "fallback":
+      return "bg-amber-500";
+    case "skipped":
+      return "bg-slate-300";
+    case "failed":
+      return "bg-rose-500";
+    default:
+      return "bg-accent";
+  }
+}
+
+export function Studio() {
+  const [stage, setStage] = useState<Stage>("landing");
+  const [heroKey] = useState(0);
+
   const [styleSample, setStyleSample] = useState("");
   const [activeProfile, setActiveProfile] = useState<string | null>(null);
-
-  // Step 2 — generated DNA
   const [dna, setDna] = useState<WritingDNA | null>(null);
   const [dnaMeta, setDnaMeta] = useState<DnaMeta | null>(null);
 
-  // Step 3 — rewrite
   const [sourceText, setSourceText] = useState(DEFAULT_SOURCE);
   const [format, setFormat] = useState<OutputFormat>("casual-message");
-  const [useKnowledge, setUseKnowledge] = useState(false);
+  const [useKnowledge, setUseKnowledge] = useState(true);
   const [recipientName, setRecipientName] = useState("");
   const [senderName, setSenderName] = useState("");
-  const [result, setResult] = useState<RewriteResult | null>(null);
+  const [sentDraft, setSentDraft] = useState("");
+  const [result, setResult] = useState<AgentPipelineResult | null>(null);
 
   const [loadingDna, setLoadingDna] = useState(false);
   const [loadingRewrite, setLoadingRewrite] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  const [tutorialState, setTutorialState] = useState<TutorialState>("intro");
-  const [tutorialVisible, setTutorialVisible] = useState(false);
-  const [tutorialMounted, setTutorialMounted] = useState(false);
-
+  const demoProfile = DEMO_PROFILES[0];
   const sampleReady = styleSample.trim().length >= MIN_SAMPLE;
 
-  useEffect(() => {
-    setTutorialMounted(true);
-    const saved = window.localStorage.getItem("writing-dna-studio-tutorial");
-    if (saved !== "skipped" && saved !== "done") {
-      setTutorialVisible(true);
-      setTutorialState("intro");
-    }
-  }, []);
-
-  useEffect(() => {
-    if (restartSignal === undefined) return;
-    if (!tutorialMounted) return;
-    setTutorialVisible(true);
-    setTutorialState("intro");
-  }, [restartSignal, tutorialMounted]);
-
-  useEffect(() => {
-    if (!tutorialVisible) return;
-    if (tutorialState === "sampleInput" && sampleReady) {
-      setTutorialState("generateDna");
-    }
-    if (tutorialState === "sourceText" && sourceText.trim().length >= 3) {
-      setTutorialState("formatSelect");
-    }
-  }, [tutorialVisible, tutorialState, sampleReady, sourceText]);
-
-  function saveTutorialStatus(status: "skipped" | "done") {
-    window.localStorage.setItem("writing-dna-studio-tutorial", status);
-    setTutorialVisible(false);
-    setTutorialState("done");
-  }
-
-  function onSampleChange(value: string) {
-    setStyleSample(value);
+  function resetAll() {
+    setStage("landing");
+    setStyleSample("");
     setActiveProfile(null);
-    // Editing the sample invalidates a previously generated DNA + rewrite.
     setDna(null);
     setDnaMeta(null);
     setResult(null);
-    if (tutorialVisible && tutorialState === "sampleInput" && value.trim().length >= MIN_SAMPLE) {
-      setTutorialState("generateDna");
-    }
+    setSourceText(DEFAULT_SOURCE);
+    setFormat("casual-message");
+    setUseKnowledge(true);
+    setRecipientName("");
+    setSenderName("");
+    setSentDraft("");
+    setError(null);
   }
 
-  function loadDemo(p: DemoProfile) {
-    setStyleSample(p.sample);
-    setActiveProfile(p.id);
+  function handleSampleChange(value: string) {
+    setStyleSample(value);
+    setActiveProfile(null);
     setDna(null);
     setDnaMeta(null);
     setResult(null);
     setError(null);
-    if (tutorialVisible && tutorialState !== "done") {
-      setTutorialState("generateDna");
-    }
+  }
+
+  function applyDemoSample() {
+    setStyleSample(demoProfile.sample);
+    setActiveProfile(demoProfile.id);
+    setDna(null);
+    setDnaMeta(null);
+    setResult(null);
+    setError(null);
   }
 
   async function handleGenerateDna() {
@@ -132,9 +143,6 @@ export function Studio({ restartSignal }: StudioProps) {
       setDna(data.dna as WritingDNA);
       const active = DEMO_PROFILES.find((p) => p.id === activeProfile);
       setDnaMeta(active ? { source: "demo", label: active.name } : { source: "user" });
-      if (tutorialVisible) {
-        setTutorialState("sourceText");
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unexpected error.");
     } finally {
@@ -142,10 +150,13 @@ export function Studio({ restartSignal }: StudioProps) {
     }
   }
 
-  async function handleRewrite() {
+  async function handleRewrite(formatOverride?: OutputFormat, refinement?: Refinement) {
+    const effectiveFormat = formatOverride ?? format;
     setLoadingRewrite(true);
     setError(null);
     setCopied(false);
+    setStatusMessage(null);
+    setSentDraft(sourceText.trim());
     try {
       const res = await fetch("/api/rewrite", {
         method: "POST",
@@ -153,18 +164,16 @@ export function Studio({ restartSignal }: StudioProps) {
         body: JSON.stringify({
           styleSample,
           sourceText,
-          format,
+          format: effectiveFormat,
           useKnowledge,
           recipientName,
           senderName,
+          refinement,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Something went wrong.");
-      setResult(data as RewriteResult);
-      if (tutorialVisible) {
-        setTutorialState("result");
-      }
+      setResult(data as AgentPipelineResult);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unexpected error.");
     } finally {
@@ -172,465 +181,610 @@ export function Studio({ restartSignal }: StudioProps) {
     }
   }
 
+  function refine(refinement?: Refinement, formatOverride?: OutputFormat) {
+    if (formatOverride) setFormat(formatOverride);
+    void handleRewrite(formatOverride, refinement);
+  }
+
   async function copyOutput() {
     if (!result) return;
     await navigator.clipboard.writeText(result.output);
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    setStatusMessage("Copied — ready to paste anywhere.");
+    setTimeout(() => {
+      setCopied(false);
+      setStatusMessage(null);
+    }, 2000);
   }
 
-  function openTutorialIntro() {
-    setTutorialVisible(true);
-    setTutorialState("intro");
+  async function shareOutput() {
+    if (!result) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({ text: result.output });
+        setStatusMessage("Shared successfully.");
+      } else {
+        await navigator.clipboard.writeText(result.output);
+        setStatusMessage("Copied — ready to paste anywhere.");
+      }
+    } catch {
+      await navigator.clipboard.writeText(result.output);
+      setStatusMessage("Copied — ready to paste anywhere.");
+    }
+    setCopied(true);
+    setTimeout(() => {
+      setCopied(false);
+      setStatusMessage(null);
+    }, 2000);
   }
 
-  function startTutorial() {
-    setTutorialVisible(true);
-    setTutorialState("sampleInput");
-  }
-
-  function startDemoWalkthrough() {
-    const demo = DEMO_PROFILES[0];
-    setStyleSample(demo.sample);
-    setActiveProfile(demo.id);
-    setDna(null);
-    setDnaMeta(null);
-    setResult(null);
+  function startTeaching() {
+    setStage("teach");
     setError(null);
-    setSourceText(DEFAULT_SOURCE);
-    setFormat("casual-message");
-    setUseKnowledge(false);
-    setTutorialVisible(true);
-    setTutorialState("generateDna");
   }
 
-  const tutorialActive = tutorialVisible && tutorialState !== "done";
-  const tutorialIntroOpen = tutorialVisible && tutorialState === "intro";
+  function startTeachingWithDemo() {
+    applyDemoSample();
+    setStage("teach");
+  }
 
-  const sampleStepFocused = tutorialActive && tutorialState === "sampleInput";
-  const generateStepFocused = tutorialActive && tutorialState === "generateDna";
-  const sourceStepFocused = tutorialActive && tutorialState === "sourceText";
-  const formatStepFocused = tutorialActive && tutorialState === "formatSelect";
-  const rewriteStepFocused = tutorialActive && tutorialState === "rewrite";
-  const resultStepFocused = tutorialActive && tutorialState === "result";
-
-  return (
-    <div className="relative">
-      {tutorialIntroOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-slate-950/65" />
-          <div className="relative z-10 w-full max-w-2xl rounded-3xl border border-border bg-card p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-accent">
-                  Guided demo
-                </p>
-                <h2 className="mt-4 text-3xl font-semibold">Explore Writing DNA</h2>
-                <p className="mt-2 text-sm text-muted">See your voice transform in three simple steps.</p>
-              </div>
-              <button
-                onClick={() => saveTutorialStatus("skipped")}
-                className="rounded-full border border-border bg-background/90 px-3 py-1 text-sm font-semibold text-muted transition hover:bg-background"
-              >
-                ×
-              </button>
-            </div>
-            <div className="mt-6 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-3xl border border-border bg-background p-5 text-center transition hover:-translate-y-1 hover:shadow-md">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-3xl bg-accent-soft text-xl">
-                  📝
-                </div>
-                <p className="mt-4 text-sm font-semibold">Sample</p>
-                <p className="mt-1 text-xs text-muted">Your writing</p>
-              </div>
-              <div className="rounded-3xl border border-border bg-background p-5 text-center transition hover:-translate-y-1 hover:shadow-md">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-3xl bg-accent-soft text-xl">
-                  🧬
-                </div>
-                <p className="mt-4 text-sm font-semibold">Extract DNA</p>
-                <p className="mt-1 text-xs text-muted">Style profile</p>
-              </div>
-              <div className="rounded-3xl border border-border bg-background p-5 text-center transition hover:-translate-y-1 hover:shadow-md">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-3xl bg-accent-soft text-xl">
-                  ✨
-                </div>
-                <p className="mt-4 text-sm font-semibold">Rewrite</p>
-                <p className="mt-1 text-xs text-muted">In your voice</p>
-              </div>
-            </div>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button
-                onClick={startDemoWalkthrough}
-                className="rounded-full bg-accent px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition hover:bg-accent-2"
-              >
-                Showcase demo
-              </button>
-              <button
-                onClick={startTutorial}
-                className="rounded-full border border-border bg-background px-5 py-3 text-sm font-semibold text-foreground transition hover:border-accent"
-              >
-                Use my writing
-              </button>
-              <button
-                onClick={() => saveTutorialStatus("skipped")}
-                className="rounded-full border border-border bg-transparent px-5 py-3 text-sm font-semibold text-muted transition hover:border-rose-500 hover:text-rose-500"
-              >
-                Skip demo
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {tutorialActive && !tutorialIntroOpen && (
-        <div className="pointer-events-none absolute inset-0 z-10 bg-slate-950/10" />
-      )}
-      <div className="grid gap-6 lg:grid-cols-2 relative z-20">
-      {/* ───────────────────────── LEFT: guided flow ───────────────────────── */}
-      <div className="flex flex-col gap-5">
-        {/* STEP 1 — paste samples */}
-        <section
-          className={`rounded-3xl border p-5 shadow-sm transition-all duration-300 relative ${
-            sampleStepFocused
-              ? "border-accent bg-accent-soft/25 shadow-[0_0_0_6px_rgba(56,189,248,0.24)]"
-              : tutorialActive
-              ? "border-border bg-card/90 opacity-70"
-              : "border-border bg-card"
-          }`}
-        >
-          <StepHeader icon="📝" label="Sample" subtitle="Your voice" />
-          {sampleStepFocused && (
-            <TutorialCallout title="Paste a sample" description="Start with your own writing or choose a demo style." />
-          )}
-          <textarea
-            value={styleSample}
-            onChange={(e) => onSampleChange(e.target.value)}
-            placeholder="Paste 2–4 sentences in your natural voice (English or 한국어)…"
-            rows={5}
-            className="mt-3 w-full resize-y rounded-xl border border-border bg-background p-3 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-          />
-          <div className="mt-2 flex items-center justify-between text-xs text-muted">
-            <span>{styleSample.trim().length} chars</span>
-            {!sampleReady && styleSample.length > 0 && (
-              <span className="text-amber-500">Keep going — more sample helps.</span>
-            )}
-          </div>
-
-          <p className="mt-3 rounded-xl bg-accent-soft/60 p-3 text-[11px] leading-snug text-muted">
-            <span className="font-semibold">Consent first.</span> Your sample is temporary and never stored.
+  // ---------------------------------------------------------------- Landing
+  function renderLanding() {
+    return (
+      <div className="mx-auto flex max-w-xl flex-col items-center gap-8 text-center">
+        <div className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-accent">
+            Writing assistant
           </p>
+          <h1 className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
+            Write anything.
+            <br />
+            Make it sound like you.
+          </h1>
+        </div>
 
-          <div className="mt-4 border-t border-dashed border-border pt-4">
-            <p className="mb-2 text-xs font-medium text-muted">Demo styles</p>
-            <div className="flex flex-wrap gap-2">
-              {DEMO_PROFILES.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => loadDemo(p)}
-                  title={p.blurb}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                    activeProfile === p.id
-                      ? "border-accent bg-accent-soft text-accent"
-                      : "border-border bg-background hover:border-accent/50"
-                  }`}
-                >
-                  <span aria-hidden>{p.emoji}</span>
-                  {p.name}
-                </button>
-              ))}
-            </div>
-            <p className="mt-2 text-[11px] text-muted">
-              Synthetic styles are for safe testing only — they’re fictional, not real people.
-            </p>
-          </div>
-        </section>
+        <HeroChat key={heroKey} />
 
-        {/* STEP 2 — generate DNA */}
-        <section
-          className={`rounded-3xl border p-5 shadow-sm transition-all duration-300 relative ${
-            generateStepFocused
-              ? "border-accent bg-accent-soft/25 shadow-[0_0_0_6px_rgba(56,189,248,0.24)]"
-              : tutorialActive
-              ? "border-border bg-card/90 opacity-70"
-              : "border-border bg-card"
-          }`}
-        >
-          <StepHeader icon="🧬" label="Extract DNA" subtitle="Style profile" />
-          {generateStepFocused && (
-            <TutorialCallout title="Extract DNA" description="Analyze your writing into a reusable style fingerprint." />
-          )}
+        <div className="flex flex-wrap items-center justify-center gap-3">
           <button
-            onClick={handleGenerateDna}
-            disabled={!sampleReady || loadingDna}
-            className="mt-3 w-full rounded-xl border border-accent bg-accent-soft px-5 py-3 text-sm font-semibold text-accent transition hover:bg-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={startTeaching}
+            className="rounded-full bg-accent px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition hover:bg-accent-2"
           >
-            {loadingDna ? "Analyzing your voice…" : dna ? "🧬 Regenerate Writing DNA" : "🧬 Generate Writing DNA"}
+            Teach it my voice
           </button>
-          {dna && !loadingDna && (
-            <p className="mt-2 text-xs text-emerald-500">
-              ✓ DNA ready — see your profile on the right, then rewrite below.
-            </p>
-          )}
-        </section>
-
-        {/* STEP 3 — rewrite */}
-        <section
-          className={`rounded-3xl border p-5 shadow-sm transition-all duration-300 relative ${
-            rewriteStepFocused || formatStepFocused || sourceStepFocused
-              ? "border-accent bg-accent-soft/25 shadow-[0_0_0_6px_rgba(56,189,248,0.24)]"
-              : tutorialActive
-              ? "border-border bg-card/90 opacity-70"
-              : "border-border bg-card"
-          }`}
-        >
-          <StepHeader icon="✨" label="Rewrite" subtitle="In your voice" />
-          {(sourceStepFocused || formatStepFocused || rewriteStepFocused) && (
-            <TutorialCallout
-              title="Rewrite now"
-              description="Enter source text, choose a format, and transform it to your voice."
-            />
-          )}
-
-          <label className="mt-3 block text-xs font-medium text-muted">What do you want to say?</label>
-          <textarea
-            value={sourceText}
-            onChange={(e) => setSourceText(e.target.value)}
-            rows={3}
-            disabled={!dna}
-            className="mt-1.5 w-full resize-y rounded-xl border border-border bg-background p-3 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-50"
-          />
-
-          <p className="mt-3 mb-2 text-xs font-medium text-muted">Output format</p>
-          <div className="grid grid-cols-2 gap-2">
-            {FORMATS.map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setFormat(f.id)}
-                disabled={!dna}
-                className={`flex flex-col gap-1 rounded-xl border p-3 text-left transition disabled:opacity-50 ${
-                  format === f.id
-                    ? "border-accent bg-accent-soft"
-                    : "border-border bg-background hover:border-accent/50"
-                }`}
-              >
-                <span className="text-sm font-semibold">
-                  {f.icon} {f.label}
-                </span>
-                <span className="text-[11px] leading-snug text-muted">{f.description}</span>
-              </button>
-            ))}
-          </div>
-
-          {format === "professional-email" && (
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <input
-                value={recipientName}
-                onChange={(e) => setRecipientName(e.target.value)}
-                placeholder="Recipient name"
-                disabled={!dna}
-                className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-50"
-              />
-              <input
-                value={senderName}
-                onChange={(e) => setSenderName(e.target.value)}
-                placeholder="Your name"
-                disabled={!dna}
-                className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-50"
-              />
-            </div>
-          )}
-
-          <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-xl border border-dashed border-border bg-background p-3">
-            <input
-              type="checkbox"
-              checked={useKnowledge}
-              onChange={(e) => setUseKnowledge(e.target.checked)}
-              disabled={!dna}
-              className="mt-0.5 h-4 w-4 accent-accent"
-            />
-            <span className="text-xs leading-snug text-muted">
-              <span className="font-medium text-foreground">Ground with knowledge layer</span>
-              <br />
-              Weave in relevant facts. Uses a <strong>mock</strong> index today —{" "}
-              <span className="text-accent">Microsoft Foundry IQ</span> in production.
-            </span>
-          </label>
-
           <button
-            onClick={handleRewrite}
-            disabled={!dna || loadingRewrite || sourceText.trim().length < 3}
-            className="mt-4 w-full overflow-hidden rounded-xl bg-linear-to-r from-accent to-accent-2 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={startTeachingWithDemo}
+            className="rounded-full border border-border bg-card px-6 py-3 text-sm font-semibold transition hover:border-accent"
           >
-            {loadingRewrite ? "Rewriting in your voice…" : "✨ Rewrite in my voice"}
+            Watch it work
           </button>
-        </section>
-
-        {error && <p className="text-sm text-rose-500">{error}</p>}
+        </div>
       </div>
+    );
+  }
 
-      {/* ───────────────────────── RIGHT: results ───────────────────────── */}
-      <div className="flex flex-col gap-5">
-        {!dna && !loadingDna && <EmptyState />}
-        {loadingDna && <DnaLoadingState />}
+  // ------------------------------------------------------------------ Teach
+  function renderTeach() {
+    const chips = dna ? voiceChips(dna) : [];
+    const sampleConfidence = dna ? dna.sampleWordCount >= 40 : false;
+    return (
+      <ChatPanel title="Voice setup" subtitle="Teach me how you write" onRestart={resetAll}>
+        <div className="flex flex-col gap-3">
+          <Bubble role="assistant">
+            <p className="font-medium text-foreground">Send me 2–3 messages that sound like you.</p>
+            <p className="mt-1 text-xs text-muted">
+              A text, a DM, an email — anything in your natural voice. English or 한국어.
+            </p>
+          </Bubble>
 
-        {dna && (
-          <DnaProfileCard
-            dna={dna}
-            title={dnaMeta?.source === "demo" ? dnaMeta.label : "Your Writing DNA"}
-            badge={dnaMeta?.source === "demo" ? "Demo style" : undefined}
+          {(loadingDna || dna) && styleSample && (
+            <Bubble role="user">
+              <span className="line-clamp-4 whitespace-pre-wrap">{styleSample}</span>
+            </Bubble>
+          )}
+
+          {loadingDna && (
+            <Bubble role="assistant" className="w-fit">
+              <span className="text-muted">Learning your voice</span> <TypingDots />
+            </Bubble>
+          )}
+
+          {dna && !loadingDna && (
+            <>
+              <Bubble role="assistant">
+                <span className="inline-flex items-center gap-2">
+                  <span className="voice-pulse grid h-6 w-6 place-items-center rounded-full bg-accent text-xs text-white">
+                    ✓
+                  </span>
+                  <span className="font-medium text-foreground">
+                    {sampleConfidence ? "Got it. I learned your voice." : "Got it. I’m still learning your voice."}
+                  </span>
+                </span>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap gap-1.5">
+                    {chips.map((c, i) => (
+                      <span
+                        key={c}
+                        className="chip-in rounded-full bg-accent-soft px-2.5 py-1 text-[11px] font-medium text-accent"
+                        style={{ animationDelay: `${300 + i * 90}ms` }}
+                      >
+                        {c}
+                      </span>
+                    ))}
+                  </div>
+                  {!sampleConfidence && (
+                    <span className="rounded-full bg-rose-50 px-2 py-1 text-[10px] font-semibold text-rose-600">
+                      Low-confidence sample
+                    </span>
+                  )}
+                </div>
+
+                <details className="group mt-3">
+                  <summary className="cursor-pointer list-none text-[11px] font-medium text-muted underline-offset-2 group-open:underline">
+                    View full voice profile
+                  </summary>
+                  <div className="mt-3">
+                    <DnaProfileCard
+                      dna={dna}
+                      title={dnaMeta?.source === "demo" ? dnaMeta.label : "Your Writing DNA"}
+                      badge={dnaMeta?.source === "demo" ? "Demo voice" : undefined}
+                    />
+                  </div>
+                </details>
+              </Bubble>
+
+              <div className="mt-1 flex flex-wrap items-center gap-3">
+                <button
+                  onClick={() => setStage("compose")}
+                  className="rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition hover:bg-accent-2"
+                >
+                  Start writing →
+                </button>
+                <button
+                  onClick={() => handleSampleChange("")}
+                  className="text-xs font-medium text-muted underline-offset-2 hover:underline"
+                >
+                  Use a different voice
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
+        {!dna && !loadingDna && (
+          <Composer
+            value={styleSample}
+            onChange={handleSampleChange}
+            onSubmit={handleGenerateDna}
+            placeholder="Paste a few messages that sound like you…"
+            submitLabel="Teach my voice"
+            disabled={!sampleReady}
+            rows={4}
+            secondary={
+              <button
+                onClick={applyDemoSample}
+                className="text-xs font-medium text-accent underline-offset-2 hover:underline"
+              >
+                or use a demo voice
+              </button>
+            }
           />
         )}
 
-        {loadingRewrite && <RewriteLoadingState />}
+        {error && <p className="mt-3 text-sm text-rose-500">{error}</p>}
+      </ChatPanel>
+    );
+  }
 
-        {result && !loadingRewrite && (
-          <>
-            <section
-              className={`rounded-2xl border p-5 shadow-sm transition relative ${
-                resultStepFocused
-                  ? "border-accent bg-accent-soft/20 shadow-[0_0_0_4px_rgba(56,189,248,0.25)]"
-                  : "border-border bg-card"
-              } ${tutorialActive && !resultStepFocused ? "opacity-60" : ""}`}
-            >
-              {resultStepFocused && (
-                <TutorialCallout
-                  title="Review your rewrite"
-                  description="Copy the rewritten text and finish the tutorial when you’re ready."
-                  action={
-                    <button
-                      onClick={() => saveTutorialStatus("done")}
-                      className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent-2"
-                    >
-                      Finish tutorial
-                    </button>
-                  }
+  // ---------------------------------------------------------------- Compose
+  function renderCompose() {
+    const chips = dna ? voiceChips(dna) : [];
+    return (
+      <ChatPanel
+        title="Your voice"
+        subtitle="Writing as you"
+        onRestart={resetAll}
+        header={
+          dna ? (
+            <details className="group">
+              <summary className="flex cursor-pointer list-none flex-wrap items-center gap-1.5">
+                {chips.slice(0, 4).map((c) => (
+                  <span
+                    key={c}
+                    className="rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-medium text-accent"
+                  >
+                    {c}
+                  </span>
+                ))}
+                <span className="text-[10px] font-medium text-muted underline-offset-2 group-open:underline">
+                  profile
+                </span>
+              </summary>
+              <div className="mt-3">
+                <DnaProfileCard
+                  dna={dna}
+                  title={dnaMeta?.source === "demo" ? dnaMeta.label : "Your Writing DNA"}
+                  badge={dnaMeta?.source === "demo" ? "Demo voice" : undefined}
                 />
-              )}
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold">Rewritten output</h3>
+              </div>
+            </details>
+          ) : null
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <Bubble role="assistant">
+            <p className="font-medium text-foreground">What do you want to say?</p>
+            <p className="mt-1 text-xs text-muted">
+              Type a rough draft — I&apos;ll send it back sounding like you.
+            </p>
+          </Bubble>
+
+          {(loadingRewrite || result) && sentDraft && (
+            <Bubble role="user">
+              <span className="whitespace-pre-wrap">{sentDraft}</span>
+            </Bubble>
+          )}
+
+          {loadingRewrite && (
+            <Bubble role="assistant" className="w-fit">
+              <span className="text-muted">Writing in your voice</span> <TypingDots />
+            </Bubble>
+          )}
+
+          {result && !loadingRewrite && (
+            <Bubble role="assistant" className="max-w-[92%]!">
+              <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-foreground">
+                {result.output}
+              </p>
+
+              <div className="mt-2">
+                {result.provider.engine === "azure" ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold text-accent">
+                    ✨ Azure {result.provider.model ?? "Foundry"}
+                  </span>
+                ) : (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+                    title={result.provider.error ?? undefined}
+                  >
+                    ⚙️ Local engine{result.provider.error ? " · Azure unavailable" : ""}
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button
                   onClick={copyOutput}
-                  className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium transition hover:border-accent hover:text-accent"
+                  className="rounded-full border border-border bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-accent"
                 >
-                  {copied ? "Copied ✓" : "Copy"}
+                  {copied ? "✓ Copied" : "Copy"}
                 </button>
-              </div>
-              <div className="whitespace-pre-wrap rounded-xl bg-accent-soft/60 p-4 text-sm leading-relaxed">
-                {result.output}
+                <button
+                  onClick={shareOutput}
+                  className="rounded-full border border-border bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-accent"
+                >
+                  Share
+                </button>
+                <ScoreBreakdown score={result.score} />
               </div>
 
-              <details className="mt-3 text-xs text-muted">
-                <summary className="cursor-pointer select-none font-medium">
-                  How it was rewritten ({result.appliedTransforms.length} steps)
-                </summary>
-                <ul className="mt-2 list-disc space-y-1 pl-5">
-                  {result.appliedTransforms.map((t, i) => (
-                    <li key={i}>{t}</li>
-                  ))}
-                </ul>
-              </details>
+              {statusMessage && (
+                <p className="mt-2 text-[11px] text-muted">{statusMessage}</p>
+              )}
 
-              {useKnowledge && (
-                <div className="mt-3 rounded-lg border border-dashed border-border p-3 text-xs text-muted">
-                  <span className="font-medium text-foreground">Knowledge layer:</span>{" "}
-                  {result.knowledge.note}
-                  {result.knowledge.facts.map((f) => (
-                    <div key={f.source} className="mt-1.5 font-mono text-[11px]">
-                      • {f.claim}{" "}
-                      <span className="opacity-60">
-                        ({f.source}, {Math.round(f.confidence * 100)}%)
-                      </span>
-                    </div>
+              {result.appliedTransforms.length > 0 && (
+                <p className="mt-3 text-[11px] leading-5 text-muted">
+                  <span className="font-medium text-foreground">Why it sounds like you:</span>{" "}
+                  {result.appliedTransforms.slice(0, 2).join(" · ")}
+                </p>
+              )}
+
+              <div className="mt-3 border-t border-border pt-3">
+                <div className="flex flex-wrap gap-1.5">
+                  {REFINEMENTS.map((r) => (
+                    <button
+                      key={r.label}
+                      onClick={() => refine(r.id, r.format)}
+                      disabled={loadingRewrite}
+                      className="rounded-full border border-border bg-background px-3 py-1 text-[11px] font-medium transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {r.label}
+                    </button>
                   ))}
                 </div>
-              )}
-            </section>
+              </div>
 
-            <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-              <ScoreBreakdown score={result.score} />
-            </section>
-          </>
+              <details className="mt-4 rounded-3xl border border-border bg-card/80 p-4 text-sm text-foreground">
+                <summary className="cursor-pointer font-semibold">Agent pipeline</summary>
+                <div className="mt-3 space-y-3">
+                  {result.agentTrace.map((step) => (
+                    <div key={step.name} className="flex gap-3">
+                      <span className={`mt-1 h-2.5 w-2.5 rounded-full ${traceDotColor(step.status)}`} />
+                      <div>
+                        <p className="text-[12px] font-semibold">{step.name}</p>
+                        <p className="text-[11px] text-muted">{step.detail}</p>
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="rounded-2xl border border-border bg-background p-3">
+                    <p className="text-[11px] text-muted">Evaluation summary</p>
+                    <p className="mt-2 text-sm font-semibold">
+                      {result.evaluation.overall} / 100 • {result.evaluation.passed ? "Passed" : "Needs revision"}
+                    </p>
+                    <div className="mt-2 space-y-1 text-[11px] text-muted">
+                      {result.evaluation.revisionHints.slice(0, 2).map((hint) => (
+                        <p key={hint}>• {hint}</p>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </Bubble>
+          )}
+        </div>
+
+        {/* Format picker — compact pills above the input. */}
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          {FORMATS.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setFormat(f.id)}
+              title={f.description}
+              className={`rounded-full border px-3 py-1 text-[11px] font-medium transition ${
+                format === f.id
+                  ? "border-accent bg-accent-soft text-accent"
+                  : "border-border bg-background text-muted hover:border-accent/50"
+              }`}
+            >
+              {f.icon} {f.label}
+            </button>
+          ))}
+        </div>
+
+        {format === "professional-email" && (
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <input
+              value={recipientName}
+              onChange={(e) => setRecipientName(e.target.value)}
+              placeholder="Recipient name"
+              className="rounded-2xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+            <input
+              value={senderName}
+              onChange={(e) => setSenderName(e.target.value)}
+              placeholder="Your name"
+              className="rounded-2xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </div>
         )}
-      </div>
-    </div>
-    </div>
-  );
-}
 
-function StepHeader({
-  icon,
-  label,
-  subtitle,
-}: {
-  icon: string;
-  label: string;
-  subtitle: string;
-}) {
+        <Composer
+          value={sourceText}
+          onChange={setSourceText}
+          onSubmit={() => handleRewrite()}
+          placeholder="What do you want to say?"
+          submitLabel={loadingRewrite ? "Writing…" : "Make it sound like me"}
+          disabled={loadingRewrite || sourceText.trim().length < 3}
+          rows={2}
+          secondary={
+            <label className="flex items-center gap-1.5 text-[11px] text-muted">
+              <input
+                type="checkbox"
+                checked={useKnowledge}
+                onChange={(e) => setUseKnowledge(e.target.checked)}
+                className="h-3 w-3 accent-accent"
+              />
+              Ground with style guide
+            </label>
+          }
+        />
+
+        {error && <p className="mt-3 text-sm text-rose-500">{error}</p>}
+      </ChatPanel>
+    );
+  }
+
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex h-10 w-10 items-center justify-center rounded-3xl bg-accent-soft text-lg">
-        {icon}
-      </div>
-      <div>
-        <h2 className="text-base font-semibold">{label}</h2>
-        <p className="text-xs uppercase tracking-[0.24em] text-muted">{subtitle}</p>
-      </div>
+    <div className="mx-auto max-w-3xl px-2 py-6">
+      {stage === "landing" && renderLanding()}
+      {stage === "teach" && renderTeach()}
+      {stage === "compose" && renderCompose()}
+
+      {statusMessage && (
+        <div className="toast-in fixed bottom-8 left-1/2 z-50 rounded-full bg-foreground px-4 py-2 text-xs font-semibold text-background shadow-lg">
+          {statusMessage}
+        </div>
+      )}
     </div>
   );
 }
 
-function TutorialCallout({
+/* ============================ Presentational ============================= */
+
+function ChatPanel({
   title,
-  description,
-  action,
+  subtitle,
+  children,
+  onRestart,
+  header,
 }: {
   title: string;
-  description: string;
-  action?: ReactNode;
+  subtitle: string;
+  children: ReactNode;
+  onRestart: () => void;
+  header?: ReactNode;
 }) {
   return (
-    <div className="mt-4 rounded-3xl border border-accent/20 bg-white/95 p-4 text-sm text-foreground shadow-sm shadow-accent/10">
-      <p className="font-semibold">{title}</p>
-      <p className="mt-1 text-xs leading-5 text-muted">{description}</p>
-      {action ? <div className="mt-3">{action}</div> : null}
-    </div>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="flex h-full min-h-85 flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center">
-      <div className="dna-strand mb-4 h-12 w-12 rounded-xl" />
-      <p className="text-sm font-medium">Your Writing DNA will appear here</p>
-      <p className="mt-1 max-w-xs text-xs text-muted">
-        Paste your writing (or try a demo style), then hit{" "}
-        <span className="font-medium text-accent">Generate Writing DNA</span>.
-      </p>
-    </div>
-  );
-}
-
-function DnaLoadingState() {
-  return (
-    <div className="rounded-2xl border border-border bg-card p-5">
-      <div className="shimmer mb-3 h-4 w-40 rounded" />
-      <div className="mb-4 grid grid-cols-3 gap-2">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="shimmer h-12 rounded-xl" />
-        ))}
+    <div className="mx-auto flex max-w-xl flex-col overflow-hidden rounded-4xl border border-border bg-card/80 shadow-xl shadow-slate-950/10 backdrop-blur-xl">
+      <div className="flex items-center justify-between gap-3 border-b border-border bg-card/60 px-5 py-4">
+        <div className="flex items-center gap-3">
+          <span className="dna-strand h-9 w-9 rounded-2xl" aria-hidden />
+          <div>
+            <p className="text-sm font-semibold leading-tight text-foreground">{title}</p>
+            <p className="text-[11px] text-muted">{subtitle}</p>
+          </div>
+        </div>
+        <button
+          onClick={onRestart}
+          className="rounded-full border border-border bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-accent"
+        >
+          Start over
+        </button>
       </div>
-      <div className="flex flex-col gap-3">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="shimmer h-3 w-full rounded" />
-        ))}
+      {header && <div className="border-b border-border px-5 py-3">{header}</div>}
+      <div className="px-5 py-5">{children}</div>
+    </div>
+  );
+}
+
+function Bubble({
+  role,
+  children,
+  className = "",
+  style,
+}: {
+  role: "user" | "assistant";
+  children: ReactNode;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const tone =
+    role === "user"
+      ? "ml-auto rounded-br-md bg-accent text-white"
+      : "mr-auto rounded-bl-md border border-border bg-background text-foreground";
+  return (
+    <div
+      className={`bubble-in max-w-[85%] rounded-3xl px-4 py-3 text-sm leading-relaxed shadow-sm ${tone} ${className}`}
+      style={style}
+    >
+      {children}
+    </div>
+  );
+}
+
+function TypingDots() {
+  return (
+    <span className="inline-flex items-center gap-1 align-middle">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="typing-dot h-1.5 w-1.5 rounded-full bg-muted"
+          style={{ animationDelay: `${i * 160}ms` }}
+        />
+      ))}
+    </span>
+  );
+}
+
+function Composer({
+  value,
+  onChange,
+  onSubmit,
+  placeholder,
+  submitLabel,
+  disabled,
+  rows = 2,
+  secondary,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  placeholder: string;
+  submitLabel: string;
+  disabled: boolean;
+  rows?: number;
+  secondary?: ReactNode;
+}) {
+  return (
+    <div className="mt-4 rounded-3xl border border-border bg-background p-3 shadow-sm focus-within:border-accent">
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !disabled) onSubmit();
+        }}
+        placeholder={placeholder}
+        rows={rows}
+        className="w-full resize-none bg-transparent px-2 py-1 text-sm outline-none"
+      />
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <div className="min-w-0">{secondary}</div>
+        <button
+          onClick={onSubmit}
+          disabled={disabled}
+          className="shrink-0 rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition hover:bg-accent-2 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {submitLabel}
+        </button>
       </div>
     </div>
   );
 }
 
-function RewriteLoadingState() {
+/** The landing hero — a self-playing chat that demos the core loop (CSS-only). */
+function HeroChat() {
   return (
-    <div className="rounded-2xl border border-border bg-card p-5">
-      <div className="shimmer h-24 w-full rounded" />
+    <div className="w-full overflow-hidden rounded-4xl border border-border bg-card/80 shadow-xl shadow-slate-950/10 backdrop-blur-xl">
+      <div className="flex items-center gap-3 border-b border-border bg-card/60 px-5 py-3">
+        <span className="dna-strand h-8 w-8 rounded-2xl" aria-hidden />
+        <div className="text-left">
+          <p className="text-sm font-semibold leading-tight">Your voice assistant</p>
+          <p className="text-[11px] text-muted">ready</p>
+        </div>
+      </div>
+      <div className="flex flex-col gap-3 px-5 py-6 text-left">
+        <div
+          className="ml-auto max-w-[80%] rounded-3xl rounded-br-md bg-accent px-4 py-3 text-sm text-white shadow-sm"
+          style={{ animation: "bubbleIn 0.45s cubic-bezier(0.22,1,0.36,1) both 0.3s" }}
+        >
+          Can you send me the launch details?
+        </div>
+
+        <div
+          className="mr-auto flex max-w-[60%] items-center gap-1 rounded-3xl rounded-bl-md border border-border bg-background px-4 py-3 shadow-sm"
+          style={{
+            animation:
+              "bubbleIn 0.4s cubic-bezier(0.22,1,0.36,1) both 0.9s, typingExit 0.4s ease-in both 2.1s",
+          }}
+        >
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="typing-dot h-1.5 w-1.5 rounded-full bg-muted"
+              style={{ animationDelay: `${i * 160}ms` }}
+            />
+          ))}
+        </div>
+
+        <div
+          className="mr-auto max-w-[85%] rounded-3xl rounded-bl-md border border-border bg-background px-4 py-3 text-sm leading-relaxed text-foreground shadow-sm"
+          style={{ animation: "bubbleIn 0.45s cubic-bezier(0.22,1,0.36,1) both 2.4s" }}
+        >
+          hey! could you send over the launch details when you get a sec? would love to take a look 🙏
+        </div>
+
+        <div className="mt-4 rounded-3xl border border-border bg-background px-3 py-3 shadow-sm">
+          <div className="flex items-center gap-3 rounded-full border border-border bg-slate-950/5 px-3 py-2">
+            <input
+              disabled
+              placeholder="Type a rough thought…"
+              className="w-full bg-transparent text-sm text-muted outline-none placeholder:text-muted"
+            />
+            <button
+              type="button"
+              disabled
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-accent text-white opacity-80"
+              aria-label="Send"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 2 11 13" />
+                <path d="m22 2-7 20-4-9-9-4 20-7Z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

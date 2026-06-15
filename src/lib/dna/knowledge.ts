@@ -75,7 +75,7 @@ const MOCK_NOTE =
  */
 export function retrieveKnowledge(sourceText: string, enabled: boolean): KnowledgeResult {
   if (!enabled) {
-    return { facts: [], grounded: false, note: DISABLED_NOTE };
+    return { facts: [], grounded: false, engine: "disabled", note: DISABLED_NOTE };
   }
 
   const lower = sourceText.toLowerCase();
@@ -87,7 +87,8 @@ export function retrieveKnowledge(sourceText: string, enabled: boolean): Knowled
 
   return {
     facts,
-    grounded: false, // still mock — becomes true once Foundry IQ is wired in
+    grounded: false, // local mock — Foundry-backed grounding sets grounded: true
+    engine: "local",
     note: facts.length
       ? MOCK_NOTE
       : "No matching knowledge found in the mock index for this text.",

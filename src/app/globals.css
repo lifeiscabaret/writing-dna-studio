@@ -75,3 +75,78 @@ body {
     transparent 9px
   );
 }
+
+/* ---------------------------------------------------------------------------
+   Chat-composer motion — all CSS, no JS timers or libraries.
+   Each effect respects prefers-reduced-motion (see the bottom of this file).
+--------------------------------------------------------------------------- */
+
+/* Message bubbles fade + slide in. */
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.bubble-in {
+  animation: bubbleIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* DNA / voice chips pop in one by one (stagger via inline animation-delay). */
+@keyframes chipIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.85); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.chip-in {
+  animation: chipIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* The three "typing…" dots. */
+@keyframes typingBounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+  40%           { transform: translateY(-4px); opacity: 1; }
+}
+.typing-dot {
+  animation: typingBounce 1.2s infinite ease-in-out;
+}
+
+/* In the hero, the typing bubble collapses away before the answer arrives. */
+@keyframes typingExit {
+  to {
+    opacity: 0;
+    max-height: 0;
+    margin: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* "I learned your voice" — a couple of gentle pulses. */
+@keyframes voicePulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 45%, transparent); }
+  70%  { box-shadow: 0 0 0 12px color-mix(in oklab, var(--accent) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 0%, transparent); }
+}
+.voice-pulse {
+  animation: voicePulse 1.6s ease-out 2;
+}
+
+/* Copy-success toast. */
+@keyframes toastIn {
+  0%   { opacity: 0; transform: translate(-50%, 10px); }
+  15%  { opacity: 1; transform: translate(-50%, 0); }
+  85%  { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -8px); }
+}
+.toast-in {
+  animation: toastIn 1.6s ease-in-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble-in,
+  .chip-in,
+  .typing-dot,
+  .voice-pulse,
+  .toast-in {
+    animation: none;
+  }
+}

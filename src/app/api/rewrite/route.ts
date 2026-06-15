@@ -1,4 +1,6 @@
-import { isOutputFormat, runRewrite } from "@/lib/dna";
+import { isOutputFormat } from "@/lib/dna";
+import { runAgentPipeline } from "@/lib/agents";
+import type { Refinement } from "@/lib/agents/types";
 
 /**
  * POST /api/rewrite
@@ -10,7 +12,7 @@ import { isOutputFormat, runRewrite } from "@/lib/dna";
  *   recipientName?: string,
  *   senderName?: string,
  * }
- * Returns: RewriteResult (output + dna + score + knowledge + appliedTransforms)
+ * Returns: RewriteResult with agent tracing metadata.
  *
  * The whole extract → ground → rewrite → score pipeline runs here on the server,
  * which is exactly where a Foundry IQ retrieval call and/or an LLM rewrite would
@@ -31,6 +33,7 @@ export async function POST(request: Request) {
     useKnowledge,
     recipientName,
     senderName,
+    refinement,
   } = (body ?? {}) as Record<string, unknown>;
 
   if (typeof styleSample !== "string" || styleSample.trim().length < 20) {
@@ -46,13 +49,20 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unknown output format." }, { status: 400 });
   }
 
-  const result = runRewrite({
+  const refinementValue =
+    typeof refinement === "string" &&
+    ["warmer", "shorter", "more confident", "more casual", "more polished"].includes(refinement)
+      ? (refinement as Refinement)
+      : undefined;
+
+  const result = await runAgentPipeline({
     styleSample,
     sourceText,
     format,
     useKnowledge: Boolean(useKnowledge),
     recipientName: typeof recipientName === "string" ? recipientName : undefined,
     senderName: typeof senderName === "string" ? senderName : undefined,
+    refinement: refinementValue,
   });
 
   return Response.json(result);
