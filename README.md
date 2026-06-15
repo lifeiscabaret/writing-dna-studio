@@ -74,6 +74,29 @@ formal/casual vocabulary, …), so the score is **explainable** rather than a bl
 └──────────────────────────────────────────────────────────────┘
 ```
 
+### Agentic architecture
+
+This MVP includes a lightweight agent pipeline layer that runs alongside the
+existing deterministic rewrite engine while preserving the current UI and
+existing API contract.
+
+The new agent pipeline is:
+
+- **Voice Profile Agent** — wraps `extractWritingDNA()` to build a voice
+  fingerprint and surface core traits.
+- **Intent Agent** — infers task type, user goal, recommended tone, and a
+  confidence score from the source draft and selected format.
+- **Knowledge Grounding Agent** — optionally activates the existing mock
+  grounding layer and records whether grounding facts were retrieved.
+- **Rewrite Agent** — executes the deterministic rewrite pipeline and preserves
+  transform metadata.
+- **Evaluation Harness Agent** — scores the output on voice match, meaning
+  preservation, format fit, safety/consent, and readability.
+
+The current build is still deterministic and local, but the pipeline is
+provider-ready so Microsoft Foundry IQ / Azure AI Foundry can be added later
+without changing the client or API surface.
+
 ### The engine (`src/lib/dna/`)
 
 | File | Responsibility |

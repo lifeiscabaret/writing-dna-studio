@@ -5,9 +5,9 @@ import {
   DEMO_PROFILES,
   FORMATS,
   type OutputFormat,
-  type RewriteResult,
   type WritingDNA,
 } from "@/lib/dna";
+import type { AgentPipelineResult } from "@/lib/agents";
 import { DnaProfileCard } from "./DnaProfileCard";
 import { ScoreBreakdown } from "./ScoreBreakdown";
 
@@ -60,7 +60,7 @@ export function Studio() {
   const [recipientName, setRecipientName] = useState("");
   const [senderName, setSenderName] = useState("");
   const [sentDraft, setSentDraft] = useState("");
-  const [result, setResult] = useState<RewriteResult | null>(null);
+  const [result, setResult] = useState<AgentPipelineResult | null>(null);
 
   const [loadingDna, setLoadingDna] = useState(false);
   const [loadingRewrite, setLoadingRewrite] = useState(false);
@@ -147,7 +147,7 @@ export function Studio() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Something went wrong.");
-      setResult(data as RewriteResult);
+      setResult(data as AgentPipelineResult);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unexpected error.");
     } finally {
@@ -407,6 +407,33 @@ export function Studio() {
                   ))}
                 </div>
               </div>
+
+              <details className="mt-4 rounded-3xl border border-border bg-card/80 p-4 text-sm text-foreground">
+                <summary className="cursor-pointer font-semibold">Agent pipeline</summary>
+                <div className="mt-3 space-y-3">
+                  {result.agentTrace.map((step) => (
+                    <div key={step.name} className="flex gap-3">
+                      <span className="mt-1 h-2.5 w-2.5 rounded-full bg-accent" />
+                      <div>
+                        <p className="text-[12px] font-semibold">{step.name}</p>
+                        <p className="text-[11px] text-muted">{step.detail}</p>
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="rounded-2xl border border-border bg-background p-3">
+                    <p className="text-[11px] text-muted">Evaluation summary</p>
+                    <p className="mt-2 text-sm font-semibold">
+                      {result.evaluation.overall} / 100 • {result.evaluation.passed ? "Passed" : "Needs revision"}
+                    </p>
+                    <div className="mt-2 space-y-1 text-[11px] text-muted">
+                      {result.evaluation.revisionHints.slice(0, 2).map((hint) => (
+                        <p key={hint}>• {hint}</p>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </details>
             </Bubble>
           )}
         </div>
