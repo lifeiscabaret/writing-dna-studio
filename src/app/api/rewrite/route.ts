@@ -1,5 +1,6 @@
 import { isOutputFormat } from "@/lib/dna";
 import { runAgentPipeline } from "@/lib/agents";
+import type { Refinement } from "@/lib/agents/types";
 
 /**
  * POST /api/rewrite
@@ -32,6 +33,7 @@ export async function POST(request: Request) {
     useKnowledge,
     recipientName,
     senderName,
+    refinement,
   } = (body ?? {}) as Record<string, unknown>;
 
   if (typeof styleSample !== "string" || styleSample.trim().length < 20) {
@@ -47,13 +49,20 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unknown output format." }, { status: 400 });
   }
 
-  const result = runAgentPipeline({
+  const refinementValue =
+    typeof refinement === "string" &&
+    ["warmer", "shorter", "more confident", "more casual", "more polished"].includes(refinement)
+      ? (refinement as Refinement)
+      : undefined;
+
+  const result = await runAgentPipeline({
     styleSample,
     sourceText,
     format,
     useKnowledge: Boolean(useKnowledge),
     recipientName: typeof recipientName === "string" ? recipientName : undefined,
     senderName: typeof senderName === "string" ? senderName : undefined,
+    refinement: refinementValue,
   });
 
   return Response.json(result);
