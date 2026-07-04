@@ -375,7 +375,7 @@ src/
 │  │  ├─ extract/route.ts     # POST /api/extract
 │  │  └─ rewrite/route.ts     # POST /api/rewrite
 │  ├─ layout.tsx              # metadata, fonts
-│  ├─ page.tsx                # hero + <Studio/> (Server Component)
+│  ├─ page.tsx                # top bar + <Studio/> + footer ("use client"; Restart remounts Studio)
 │  └─ globals.css             # Tailwind v4 theme + animations
 ├─ components/
 │  ├─ Studio.tsx              # chat-first client component (landing · teach · compose)
