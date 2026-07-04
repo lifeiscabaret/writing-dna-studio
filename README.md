@@ -194,8 +194,13 @@ The agent pipeline and Azure provider live alongside the engine:
 
 | File | Responsibility |
 |------|----------------|
-| `src/lib/agents/runAgentPipeline.ts` | Orchestrates the agents end-to-end |
+| `src/lib/agents/types.ts` | Shared agent contracts (`AgentTraceStep`, `IntentResult`, `EvaluationResult`, `AgentPipelineResult`, …) |
+| `src/lib/agents/voiceProfileAgent.ts` | Wraps `extractWritingDNA()` → voice fingerprint + core traits |
+| `src/lib/agents/intentAgent.ts` | Infers task type, user goal, recommended tone, and confidence |
 | `src/lib/agents/knowledgeGroundingAgent.ts` | Local synthetic guidance (default) / optional Foundry grounding |
+| `src/lib/agents/evaluationHarnessAgent.ts` | Scores voice match, meaning preservation, format fit, safety, and readability |
+| `src/lib/agents/runAgentPipeline.ts` | Orchestrates the agents end-to-end (Azure rewrite + local fallback) |
+| `src/lib/agents/index.ts` | Agent-layer public exports |
 | `src/lib/providers/azureFoundryProvider.ts` | Azure AI Foundry (gpt-5-mini) rewrite + guidance calls, timeouts, fallback |
 | `docs/knowledge/writing-dna-style-guide.md` | The **synthetic** style-guide knowledge source |
 
